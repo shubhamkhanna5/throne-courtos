@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Playfair Display", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-primary: #000000;
+  --color-primary-dim: #333333;
+  --color-on-primary: #ffffff;
+  --color-surface: #ffffff;
+  --color-on-surface: #000000;
+  --color-surface-container: #f5f5f5;
+  --color-surface-container-low: #fafafa;
+  --color-surface-container-lowest: #ffffff;
+  --color-outline: #e0e0e0;
+  --color-outline-variant: #eeeeee;
+  --color-secondary: #666666;
+  --color-tertiary: #000000;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-dim: #333333;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-primary font-sans antialiased;
+  }
+}
+
+/* Custom styles for the new home page */
+.home-split-pane {
+  @apply relative min-h-screen overflow-hidden flex flex-col md:flex-row;
+}
+
+.home-pane-left {
+  @apply flex-1 bg-[#F2F2F2] relative flex flex-col justify-between p-8 md:p-16 border-r border-black/5;
+}
+
+.home-pane-right {
+  @apply flex-1 bg-[#EBEBEB] relative flex flex-col justify-between p-8 md:p-16;
+}
+
+.home-heading {
+  @apply font-display italic font-black text-6xl md:text-8xl leading-[0.85] tracking-tighter uppercase;
+}
+
+.home-label {
+  @apply font-mono text-[11px] tracking-[0.2em] uppercase font-bold;
+}
+
+.home-button-dark {
+  @apply w-full bg-[#232323] text-white p-6 flex items-center justify-between hover:bg-black transition-all;
+}
+
+.home-button-outline {
+  @apply w-full bg-black text-white p-6 flex items-center justify-between hover:bg-black/80 transition-all;
+}
+
+.home-stat-label {
+  @apply font-mono text-[10px] tracking-widest uppercase text-black/40 mb-1;
+}
+
+.home-stat-value {
+  @apply font-display italic text-4xl md:text-5xl leading-none;
+}
