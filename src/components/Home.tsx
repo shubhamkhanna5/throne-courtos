@@ -43,29 +43,56 @@ export default function Home({
       </header>
 
       {/* Main Content Split */}
-      <main className="flex-1 flex flex-col md:flex-row">
+      <main className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Left Pane: Player Portal */}
-        <section className="home-pane-left group/pane">
+        <motion.section 
+          initial={{ x: -100, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          className="home-pane-left group/pane"
+        >
           <div className="flex justify-between items-start mb-8">
             <span className="home-label text-[#8A9A5B]">TERMINAL // 01</span>
           </div>
 
-          <div className="absolute inset-0 opacity-[0.03] pointer-events-none flex items-center justify-center overflow-hidden">
+          <motion.div 
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 0.03 }}
+            transition={{ delay: 0.4, duration: 1 }}
+            className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden"
+          >
             <svg viewBox="0 0 100 100" className="w-[80%] h-[80%] text-black fill-current">
               <circle cx="50" cy="50" r="45" stroke="currentColor" strokeWidth="0.5" fill="none" />
               <rect x="30" y="20" width="40" height="30" stroke="currentColor" strokeWidth="0.5" fill="none" />
               <path d="M30 50 Q50 70 70 50" stroke="currentColor" strokeWidth="0.5" fill="none" />
             </svg>
-          </div>
+          </motion.div>
 
           <div className="relative z-10 space-y-12">
-            <h1 className="home-heading">PLAYER<br />PORTAL</h1>
+            <motion.h1 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.2, duration: 0.6 }}
+              className="home-heading"
+            >
+              PLAYER<br />PORTAL
+            </motion.h1>
 
-            <p className="max-w-xs text-sm text-black/60 leading-relaxed font-medium">
+            <motion.p 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.3, duration: 0.6 }}
+              className="max-w-xs text-sm text-black/60 leading-relaxed font-medium"
+            >
               Access the global scoreboard, track real-time statistics, and manage your operator profile. Tactical data for the modern competitor.
-            </p>
+            </motion.p>
 
-            <div className="flex flex-col gap-4 w-full max-w-sm">
+            <motion.div 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.4, duration: 0.6 }}
+              className="flex flex-col gap-4 w-full max-w-sm"
+            >
               <button 
                 onClick={onPlayerLogin}
                 className="home-button-dark"
@@ -81,24 +108,46 @@ export default function Home({
                 <span className="home-label">SEARCH PLAYERS</span>
                 <Search className="w-5 h-5" />
               </button>
-            </div>
+            </motion.div>
           </div>
-        </section>
+        </motion.section>
 
         {/* Right Pane: Admin Console */}
-        <section className="home-pane-right group/pane">
+        <motion.section 
+          initial={{ x: 100, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          className="home-pane-right group/pane"
+        >
           <div className="flex justify-end items-start mb-8">
             <span className="home-label text-[#D22B2B]">OPERATOR // SECURE</span>
           </div>
 
           <div className="relative z-10 space-y-12 flex flex-col items-end text-right">
-            <h1 className="home-heading">ADMIN<br />CONSOLE</h1>
+            <motion.h1 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.2, duration: 0.6 }}
+              className="home-heading"
+            >
+              ADMIN<br />CONSOLE
+            </motion.h1>
 
-            <p className="max-w-xs text-sm text-black/60 leading-relaxed font-medium">
+            <motion.p 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.3, duration: 0.6 }}
+              className="max-w-xs text-sm text-black/60 leading-relaxed font-medium"
+            >
               Execute tournament protocols, deploy score updates, and manage system logs. Command-level authorization required.
-            </p>
+            </motion.p>
 
-            <div className="flex flex-col gap-4 w-full max-w-sm">
+            <motion.div 
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.4, duration: 0.6 }}
+              className="flex flex-col gap-4 w-full max-w-sm"
+            >
               <button 
                 onClick={onAdminLogin}
                 className="home-button-dark"
@@ -114,10 +163,15 @@ export default function Home({
                 <span className="home-label">SCORE ENTRY</span>
                 <Edit3 className="w-5 h-5" />
               </button>
-            </div>
+            </motion.div>
           </div>
 
-          <div className="relative z-10 flex justify-between items-end pt-8 border-t border-black/10">
+          <motion.div 
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.6, duration: 0.6 }}
+            className="relative z-10 flex justify-between items-end pt-8 border-t border-black/10"
+          >
             <div>
               <div className="home-stat-label">SYSTEM_STATUS</div>
               <div className="flex items-center gap-2">
@@ -138,8 +192,8 @@ export default function Home({
                 </div>
               </div>
             </div>
-          </div>
-        </section>
+          </motion.div>
+        </motion.section>
       </main>
 
       {/* Footer */}

@@ -1,8 +1,9 @@
-import React, { useState, useEffect, FormEvent } from 'react';
+import React, { useState, useEffect, FormEvent, useRef } from 'react';
 import { Tournament, TournamentMode, Player } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { Trash2, Plus, Play, RotateCcw, CheckCircle2, Clock, UserPlus, AlertTriangle } from 'lucide-react';
+import { Trash2, Plus, Play, RotateCcw, CheckCircle2, Clock, UserPlus, AlertTriangle, Upload, Camera } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Turnstile } from '@marsidev/react-turnstile';
 
 interface SetupProps {
   tournament: Tournament | null;
@@ -75,30 +76,107 @@ export default function Setup({ tournament }: SetupProps) {
   const [regEmail, setRegEmail] = useState('');
   const [regDupr, setRegDupr] = useState('');
   const [regJersey, setRegJersey] = useState('');
+  const [regAvatar, setRegAvatar] = useState<File | null>(null);
+  const [regAvatarPreview, setRegAvatarPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleRegister = (e: FormEvent) => {
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setRegAvatar(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setRegAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRegister = async (e: FormEvent) => {
     e.preventDefault();
     if (!regName || !regJersey) return;
     
-    const newPlayer: Partial<Player> = {
-      id: uuidv4(),
-      name: regName,
-      phone: regPhone,
-      email: regEmail,
-      duprId: regDupr,
-      jerseyNumber: regJersey,
-      points: 0,
-      pointDiff: 0,
-      pointsScored: 0,
-      podWins: 0
-    };
-    
-    setPlayers([newPlayer, ...players]);
-    setRegName('');
-    setRegPhone('');
-    setRegEmail('');
-    setRegDupr('');
-    setRegJersey('');
+    setIsUploading(true);
+    let avatarUrl = '';
+    const playerId = uuidv4();
+
+    try {
+      if (regAvatar) {
+        // 1. Get presigned URL with validation fields
+        const res = await fetch('/api/upload/avatar-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            fileName: `${playerId}-${regAvatar.name}`,
+            fileType: regAvatar.type,
+            fileSize: regAvatar.size,
+            purpose: 'avatar', // User intent validation
+            tournamentId: tournament?.id || 'pending',
+            playerId: playerId
+          })
+        });
+
+        if (res.ok) {
+          const { uploadUrl, publicUrl } = await res.json();
+          
+          // 2. Upload to R2
+          const uploadRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            body: regAvatar,
+            headers: { 'Content-Type': regAvatar.type }
+          });
+
+          if (uploadRes.ok) {
+            avatarUrl = publicUrl;
+          }
+        }
+      }
+
+      const newPlayer: Partial<Player> = {
+        id: playerId,
+        name: regName,
+        phone: regPhone,
+        email: regEmail,
+        duprId: regDupr,
+        jerseyNumber: regJersey,
+        avatarUrl: avatarUrl || undefined,
+        points: 0,
+        pointDiff: 0,
+        pointsScored: 0,
+        podWins: 0
+      };
+      
+      setPlayers([newPlayer, ...players]);
+      setRegName('');
+      setRegPhone('');
+      setRegEmail('');
+      setRegDupr('');
+      setRegJersey('');
+      setRegAvatar(null);
+      setRegAvatarPreview(null);
+    } catch (err) {
+      console.error('Failed to register player with avatar:', err);
+      alert('Failed to upload avatar. Player registered without it.');
+      
+      // Fallback: register without avatar
+      const newPlayer: Partial<Player> = {
+        id: playerId,
+        name: regName,
+        phone: regPhone,
+        email: regEmail,
+        duprId: regDupr,
+        jerseyNumber: regJersey,
+        points: 0,
+        pointDiff: 0,
+        pointsScored: 0,
+        podWins: 0
+      };
+      setPlayers([newPlayer, ...players]);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const removePlayer = (id: string) => {
@@ -120,7 +198,8 @@ export default function Setup({ tournament }: SetupProps) {
         body: JSON.stringify({ 
           name, 
           mode, 
-          players: players.filter(p => p.name && p.jerseyNumber).slice(0, requiredCount) 
+          players: players.filter(p => p.name && p.jerseyNumber).slice(0, requiredCount),
+          turnstileToken
         }),
       });
       
@@ -149,9 +228,7 @@ export default function Setup({ tournament }: SetupProps) {
   };
 
   const handleWipeAll = async () => {
-    if (confirm('NUCLEAR OPTION: This will delete ALL tournament history from Supabase. Are you absolutely sure?')) {
-      await fetch('/api/tournament/clear-all', { method: 'POST' });
-    }
+    await fetch('/api/tournament/clear-all', { method: 'POST' });
   };
 
   const bulkAdd = () => {
@@ -255,56 +332,88 @@ export default function Setup({ tournament }: SetupProps) {
                 <h2 className="text-xs font-black uppercase tracking-widest text-on-surface">PLAYER REGISTRATION</h2>
               </div>
               <form onSubmit={handleRegister} className="space-y-8">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-8">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">PLAYER LEGAL NAME</label>
+                <div className="flex flex-col sm:flex-row gap-8 items-start">
+                  {/* Avatar Upload */}
+                  <div className="flex flex-col items-center gap-3">
+                    <div 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-32 h-32 rounded-2xl border-2 border-dashed border-outline-variant hover:border-primary transition-all cursor-pointer overflow-hidden flex items-center justify-center bg-surface-container-lowest group relative"
+                    >
+                      {regAvatarPreview ? (
+                        <>
+                          <img src={regAvatarPreview} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <Camera className="w-6 h-6 text-white" />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 text-on-surface-variant group-hover:text-primary transition-colors">
+                          <Upload className="w-6 h-6" />
+                          <span className="text-[8px] font-black uppercase tracking-widest">UPLOAD AVATAR</span>
+                        </div>
+                      )}
+                    </div>
                     <input 
-                      type="text" 
-                      placeholder="E.G. JONATHAN REED"
-                      value={regName}
-                      onChange={(e) => setRegName(e.target.value)}
-                      className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary editorial-title text-xl text-on-surface placeholder:text-on-surface-variant/30"
+                      type="file" 
+                      ref={fileInputRef}
+                      onChange={handleAvatarChange}
+                      accept="image/*"
+                      className="hidden"
                     />
+                    <div className="text-[8px] font-mono font-bold uppercase text-on-surface-variant opacity-50">MAX 2MB // JPG, PNG</div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">PHONE NUMBER</label>
-                    <input 
-                      type="tel" 
-                      placeholder="555-0123"
-                      value={regPhone}
-                      onChange={(e) => setRegPhone(e.target.value)}
-                      className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">EMAIL ADDRESS</label>
-                    <input 
-                      type="email" 
-                      placeholder="REED.J@NET.OPERATOR"
-                      value={regEmail}
-                      onChange={(e) => setRegEmail(e.target.value)}
-                      className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">DUPR GLOBAL IDENTIFIER</label>
-                    <input 
-                      type="text" 
-                      placeholder="ID-8829-001"
-                      value={regDupr}
-                      onChange={(e) => setRegDupr(e.target.value)}
-                      className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">COMBAT JERSEY ASSIGNMENT</label>
-                    <input 
-                      type="text" 
-                      placeholder="42"
-                      value={regJersey}
-                      onChange={(e) => setRegJersey(e.target.value)}
-                      className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
-                    />
+
+                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-8">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">PLAYER LEGAL NAME</label>
+                      <input 
+                        type="text" 
+                        placeholder="E.G. JONATHAN REED"
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary editorial-title text-xl text-on-surface placeholder:text-on-surface-variant/30"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">PHONE NUMBER</label>
+                      <input 
+                        type="tel" 
+                        placeholder="555-0123"
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">EMAIL ADDRESS</label>
+                      <input 
+                        type="email" 
+                        placeholder="REED.J@NET.OPERATOR"
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">DUPR GLOBAL IDENTIFIER</label>
+                      <input 
+                        type="text" 
+                        placeholder="ID-8829-001"
+                        value={regDupr}
+                        onChange={(e) => setRegDupr(e.target.value)}
+                        className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">COMBAT JERSEY ASSIGNMENT</label>
+                      <input 
+                        type="text" 
+                        placeholder="42"
+                        value={regJersey}
+                        onChange={(e) => setRegJersey(e.target.value)}
+                        className="w-full bg-transparent border-b border-outline-variant py-2 focus:outline-none focus:border-primary font-mono text-sm text-on-surface placeholder:text-on-surface-variant/30"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -320,9 +429,10 @@ export default function Setup({ tournament }: SetupProps) {
                     </button>
                     <button 
                       type="submit"
-                      className="flex-1 sm:flex-none bg-primary text-on-primary px-10 py-4 rounded-lg font-black uppercase tracking-widest text-sm hover:bg-primary-dim shadow-lg transition-colors"
+                      disabled={isUploading}
+                      className="flex-1 sm:flex-none bg-primary text-on-primary px-10 py-4 rounded-lg font-black uppercase tracking-widest text-sm hover:bg-primary-dim shadow-lg transition-colors disabled:opacity-50"
                     >
-                      REGISTER PLAYER
+                      {isUploading ? 'UPLOADING...' : 'REGISTER PLAYER'}
                     </button>
                   </div>
                 </div>
@@ -331,9 +441,15 @@ export default function Setup({ tournament }: SetupProps) {
 
             {/* Global Actions */}
             <div className="mt-16 pt-12 border-t border-outline-variant space-y-4">
+              <div className="flex justify-center mb-4">
+                <Turnstile 
+                  siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY || ''} 
+                  onSuccess={(token) => setTurnstileToken(token)}
+                />
+              </div>
               <button 
                 onClick={handleSetup}
-                disabled={isSettingUp || players.length < requiredCount || (!!tournament && tournament.status !== 'SETUP')}
+                disabled={isSettingUp || players.length < requiredCount || (!!tournament && tournament.status !== 'SETUP') || !turnstileToken}
                 className="w-full bg-primary text-on-primary py-6 rounded-xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-4 hover:bg-primary-dim shadow-2xl disabled:opacity-20 transition-all"
               >
                 {isSettingUp ? (
@@ -436,9 +552,18 @@ export default function Setup({ tournament }: SetupProps) {
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="text-sm font-black uppercase tracking-tight text-on-surface">{p.name}</div>
-                      <div className="text-[10px] font-mono text-on-surface-variant opacity-60">#{p.jerseyNumber}</div>
+                    <div className="flex gap-4 items-center mb-2">
+                      {p.avatarUrl ? (
+                        <img src={p.avatarUrl} alt={p.name} className="w-10 h-10 rounded-lg object-cover border border-outline-variant" referrerPolicy="no-referrer" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center border border-outline-variant">
+                          <UserPlus className="w-4 h-4 text-on-surface-variant opacity-30" />
+                        </div>
+                      )}
+                      <div className="flex-1">
+                        <div className="text-sm font-black uppercase tracking-tight text-on-surface">{p.name}</div>
+                        <div className="text-[10px] font-mono text-on-surface-variant opacity-60">#{p.jerseyNumber}</div>
+                      </div>
                     </div>
                     <div className="flex justify-between items-center">
                       <div className="text-[8px] font-mono text-on-surface-variant opacity-50 uppercase">DUPR: {p.duprId || 'TBD'}</div>

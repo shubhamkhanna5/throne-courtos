@@ -1,8 +1,16 @@
 import React from 'react';
 import { Tournament, Player } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowUp, ArrowDown, Minus, Trophy, Download } from 'lucide-react';
+import { ArrowUp, ArrowDown, Minus, Trophy, Download, Radio } from 'lucide-react';
 import { generatePDF } from '../lib/pdf';
+
+// Helper for Avatar CDN Optimization
+const getOptimizedAvatar = (url: string | undefined) => {
+  if (!url) return null;
+  // If using Cloudflare Image Resizing, we could append ?width=100&height=100&fit=cover
+  // For now, we just return the URL as is, but this is where the logic would go.
+  return `${url}?w=128&q=75`; 
+};
 
 interface HypeBoardProps {
   tournament: Tournament;
@@ -29,6 +37,9 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
           {tournament.name}
         </motion.h1>
         <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-on-surface-variant">
+          <span className="flex items-center gap-2 text-on-tertiary-fixed-variant animate-pulse">
+            <Radio className="w-3 h-3" /> LIVE SYNC
+          </span>
           <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-primary" /> {tournament.mode} MODE</span>
           <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-primary" /> ROUND {tournament.currentRoundIndex + 1} / 4</span>
           <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-on-tertiary-fixed-variant" /> {tournament.status}</span>
@@ -96,20 +107,34 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                   </div>
 
                   {/* Player Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg font-black truncate uppercase tracking-tight text-on-surface group-hover:text-on-primary">{player.name}</span>
-                      <span className="text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/60">#{player.jerseyNumber}</span>
-                      {rank === 1 && <Trophy className="w-4 h-4 text-tertiary" />}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest ${
-                        isQualified ? 'bg-primary/10 text-primary group-hover:bg-on-primary/20 group-hover:text-on-primary' : 'bg-surface-container-high text-on-surface-variant'
-                      }`}>
-                        {isQualified ? 'Qualified' : 'Eliminated'}
+                  <div className="flex-1 min-w-0 flex items-center gap-4">
+                    {player.avatarUrl ? (
+                      <img 
+                        src={getOptimizedAvatar(player.avatarUrl) || ''} 
+                        alt={player.name} 
+                        className="w-12 h-12 rounded-xl object-cover border-2 border-outline-variant group-hover:border-on-primary/30 shadow-md" 
+                        referrerPolicy="no-referrer" 
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center border-2 border-outline-variant group-hover:border-on-primary/30 group-hover:bg-on-primary/10">
+                        <Trophy className="w-6 h-6 text-on-surface-variant opacity-20 group-hover:text-on-primary/40" />
                       </div>
-                      <div className="text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase tracking-widest">
-                        Court {Math.ceil(rank / 8)} — Pod {Math.ceil(rank / 4) % 2 === 1 ? 'A' : 'B'}
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-black truncate uppercase tracking-tight text-on-surface group-hover:text-on-primary">{player.name}</span>
+                        <span className="text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/60">#{player.jerseyNumber}</span>
+                        {rank === 1 && <Trophy className="w-4 h-4 text-tertiary" />}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest ${
+                          isQualified ? 'bg-primary/10 text-primary group-hover:bg-on-primary/20 group-hover:text-on-primary' : 'bg-surface-container-high text-on-surface-variant'
+                        }`}>
+                          {isQualified ? 'Qualified' : 'Eliminated'}
+                        </div>
+                        <div className="text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase tracking-widest">
+                          Court {Math.ceil(rank / 8)} — Pod {Math.ceil(rank / 4) % 2 === 1 ? 'A' : 'B'}
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -484,10 +484,24 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                           </div>
                           
                           <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-12">
-                            <div className="flex-1 text-center sm:text-right w-full">
-                              <div className="text-lg font-black uppercase text-on-surface leading-tight">{p1?.name}</div>
-                              <div className="text-lg font-black uppercase text-on-surface leading-tight">{p2?.name}</div>
-                              <div className="text-[10px] font-mono text-on-surface-variant opacity-60 mt-1">#{p1?.jerseyNumber} + #{p2?.jerseyNumber}</div>
+                            <div className="flex-1 flex items-center justify-end gap-4 w-full">
+                              <div className="text-right">
+                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p1?.name}</div>
+                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p2?.name}</div>
+                                <div className="text-[10px] font-mono text-on-surface-variant opacity-60 mt-1">#{p1?.jerseyNumber} + #{p2?.jerseyNumber}</div>
+                              </div>
+                              <div className="flex -space-x-4">
+                                {p1?.avatarUrl ? (
+                                  <img src={p1.avatarUrl} alt={p1.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p1?.jerseyNumber}</div>
+                                )}
+                                {p2?.avatarUrl ? (
+                                  <img src={p2.avatarUrl} alt={p2.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p2?.jerseyNumber}</div>
+                                )}
+                              </div>
                             </div>
 
                             <div className="flex items-center gap-4">
@@ -516,10 +530,24 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                               </button>
                             </div>
 
-                            <div className="flex-1 text-center sm:text-left w-full">
-                              <div className="text-lg font-black uppercase text-on-surface leading-tight">{p3?.name}</div>
-                              <div className="text-lg font-black uppercase text-on-surface leading-tight">{p4?.name}</div>
-                              <div className="text-[10px] font-mono text-on-surface-variant opacity-60 mt-1">#{p3?.jerseyNumber} + #{p4?.jerseyNumber}</div>
+                            <div className="flex-1 flex items-center justify-start gap-4 w-full">
+                              <div className="flex -space-x-4">
+                                {p3?.avatarUrl ? (
+                                  <img src={p3.avatarUrl} alt={p3.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p3?.jerseyNumber}</div>
+                                )}
+                                {p4?.avatarUrl ? (
+                                  <img src={p4.avatarUrl} alt={p4.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p4?.jerseyNumber}</div>
+                                )}
+                              </div>
+                              <div className="text-left">
+                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p3?.name}</div>
+                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p4?.name}</div>
+                                <div className="text-[10px] font-mono text-on-surface-variant opacity-60 mt-1">#{p3?.jerseyNumber} + #{p4?.jerseyNumber}</div>
+                              </div>
                             </div>
                           </div>
                         </div>

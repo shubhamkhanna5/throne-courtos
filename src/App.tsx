@@ -2,6 +2,7 @@ import React, { useState, useEffect, FormEvent } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import socket from './lib/socket';
 import { Tournament } from './types';
+import { supabase } from './lib/supabase';
 import Setup from './components/Setup';
 import OperatorDesk from './components/OperatorDesk';
 import HypeBoard from './components/HypeBoard';
@@ -24,16 +25,8 @@ function AppContent() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    socket.on('state_update', (t: Tournament | null) => {
-      setTournament(t);
-    });
-
-    socket.on('error', (msg: string) => {
-      console.error('Socket error:', msg);
-    });
-
-    // Failsafe polling
-    const interval = setInterval(async () => {
+    // 1. Initial Fetch
+    const fetchState = async () => {
       try {
         const response = await fetch('/api/tournament');
         if (response.ok) {
@@ -41,16 +34,64 @@ function AppContent() {
           setTournament(data);
         }
       } catch (err) {
-        console.error('Polling failed:', err);
+        console.error('Initial fetch failed:', err);
       }
-    }, 30000);
+    };
+    fetchState();
+
+    // 2. Socket.IO Fallback (for non-DB events)
+    socket.on('state_update', (t: Tournament | null) => {
+      setTournament(t);
+    });
+
+    // 3. Supabase Realtime (Optimized 🔥)
+    let channel: any = null;
+    if (supabase && tournament?.id) {
+      channel = supabase
+        .channel(`tournament_${tournament.id}`)
+        .on(
+          'postgres_changes', 
+          { 
+            event: '*', 
+            schema: 'public',
+            table: 'matches',
+            filter: `tournament_id=eq.${tournament.id}`
+          }, 
+          () => {
+            fetchState();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'tournaments',
+            filter: `id=eq.${tournament.id}`
+          },
+          () => {
+            fetchState();
+          }
+        )
+        .subscribe();
+    }
+
+    socket.on('error', (msg: string) => {
+      console.error('Socket error:', msg);
+    });
+
+    // Failsafe polling (reduced frequency since we have Realtime)
+    const interval = setInterval(fetchState, 60000);
 
     return () => {
       socket.off('state_update');
       socket.off('error');
+      if (supabase && channel) {
+        supabase.removeChannel(channel);
+      }
       clearInterval(interval);
     };
-  }, []);
+  }, [tournament?.id]);
 
   const handleProtectedLink = (e: React.MouseEvent, path: string) => {
     if (!isAuth) {
@@ -141,47 +182,57 @@ function AppContent() {
 
       {/* Main Content */}
       <main className={`${(userType && location.pathname !== '/') ? 'pt-4 pb-24 md:pt-20 md:pb-8 px-4 max-w-7xl mx-auto' : ''}`}>
-        <Routes>
-          <Route path="/" element={
-            <Home 
-              playerCount={tournament?.players?.length || 0}
-              courtCount={tournament?.rounds?.[0]?.pods?.length || 0}
-              onPlayerLogin={() => {
-                setUserType('PLAYER');
-                localStorage.setItem('courtos_user_type', 'PLAYER');
-                navigate('/scoreboard');
-              }}
-              onAdminLogin={() => {
-                if (isAuth) {
-                  setUserType('ADMIN');
-                  localStorage.setItem('courtos_user_type', 'ADMIN');
-                  navigate('/admin');
-                } else {
-                  setShowPinModal({ target: '/admin' });
-                }
-              }}
-              onSearchPlayers={() => {
-                setUserType('PLAYER');
-                localStorage.setItem('courtos_user_type', 'PLAYER');
-                navigate('/players');
-              }}
-            />
-          } />
-          <Route path="/scoreboard" element={tournament ? <HypeBoard tournament={tournament} /> : <NoTournament onSetup={() => setShowPinModal({ target: '/admin' })} />} />
-          <Route path="/players" element={tournament ? <PlayerPage tournament={tournament} /> : <NoTournament onSetup={() => setShowPinModal({ target: '/admin' })} />} />
-          
-          <Route path="/operator" element={
-            isAuth ? (tournament ? <OperatorDesk tournament={tournament} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
-          } />
-          
-          <Route path="/playoffs" element={
-            isAuth ? (tournament ? <PlayoffDraft tournament={tournament} socket={socket} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
-          } />
-          
-          <Route path="/admin" element={
-            isAuth ? <Setup tournament={tournament} /> : <Navigate to="/" />
-          } />
-        </Routes>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+          >
+            <Routes location={location}>
+              <Route path="/" element={
+                <Home 
+                  playerCount={tournament?.players?.length || 0}
+                  courtCount={tournament?.rounds?.[0]?.pods?.length || 0}
+                  onPlayerLogin={() => {
+                    setUserType('PLAYER');
+                    localStorage.setItem('courtos_user_type', 'PLAYER');
+                    navigate('/scoreboard');
+                  }}
+                  onAdminLogin={() => {
+                    if (isAuth) {
+                      setUserType('ADMIN');
+                      localStorage.setItem('courtos_user_type', 'ADMIN');
+                      navigate('/admin');
+                    } else {
+                      setShowPinModal({ target: '/admin' });
+                    }
+                  }}
+                  onSearchPlayers={() => {
+                    setUserType('PLAYER');
+                    localStorage.setItem('courtos_user_type', 'PLAYER');
+                    navigate('/players');
+                  }}
+                />
+              } />
+              <Route path="/scoreboard" element={tournament ? <HypeBoard tournament={tournament} /> : <NoTournament onSetup={() => setShowPinModal({ target: '/admin' })} />} />
+              <Route path="/players" element={tournament ? <PlayerPage tournament={tournament} /> : <NoTournament onSetup={() => setShowPinModal({ target: '/admin' })} />} />
+              
+              <Route path="/operator" element={
+                isAuth ? (tournament ? <OperatorDesk tournament={tournament} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
+              } />
+              
+              <Route path="/playoffs" element={
+                isAuth ? (tournament ? <PlayoffDraft tournament={tournament} socket={socket} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
+              } />
+              
+              <Route path="/admin" element={
+                isAuth ? <Setup tournament={tournament} /> : <Navigate to="/" />
+              } />
+            </Routes>
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* PIN Modal */}

@@ -66,37 +66,54 @@ export default function PlayoffDraft({ tournament, socket }: PlayoffDraftProps) 
         <div className="space-y-6">
           <h3 className="text-xs font-bold uppercase tracking-widest text-tertiary">Playoff Teams</h3>
           <div className="space-y-4">
-            {captains.map((captain, idx) => {
-              const team = (tournament.playoffTeams || []).find(t => t.captainId === captain.id);
-              const partner = (tournament.players || []).find(p => p.id === team?.partnerId);
-              const isActive = idx === currentCaptainIdx;
+            <AnimatePresence mode="popLayout">
+              {captains.map((captain, idx) => {
+                const team = (tournament.playoffTeams || []).find(t => t.captainId === captain.id);
+                const partner = (tournament.players || []).find(p => p.id === team?.partnerId);
+                const isActive = idx === currentCaptainIdx;
 
-              return (
-                <div 
-                  key={captain.id}
-                  className={`p-6 rounded-2xl border-2 transition-all ${
-                    isActive ? 'border-outline bg-surface shadow-xl scale-105' : 'border-transparent bg-surface-variant'
-                  }`}
-                >
-                  <div className="flex justify-between items-center mb-4">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-tertiary">TEAM {idx + 1}</span>
-                    {isActive && <div className="text-[10px] bg-primary text-surface px-2 py-0.5 rounded animate-pulse">PICKING...</div>}
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <div className="text-[8px] font-bold uppercase text-tertiary">CAPTAIN</div>
-                      <div className="text-lg font-bold truncate text-primary">{captain.name}</div>
+                return (
+                  <motion.div 
+                    key={captain.id}
+                    layout
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ 
+                      opacity: 1, 
+                      x: 0,
+                      scale: isActive ? 1.05 : 1,
+                    }}
+                    className={`p-6 rounded-2xl border-2 transition-all ${
+                      isActive ? 'border-outline bg-surface shadow-xl' : 'border-transparent bg-surface-variant'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-tertiary">TEAM {idx + 1}</span>
+                      {isActive && <div className="text-[10px] bg-primary text-surface px-2 py-0.5 rounded animate-pulse">PICKING...</div>}
                     </div>
-                    <div className="space-y-1">
-                      <div className="text-[8px] font-bold uppercase text-tertiary">PARTNER</div>
-                      <div className="text-lg font-bold truncate text-primary">
-                        {partner ? partner.name : <span className="text-tertiary italic">PENDING</span>}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <div className="text-[8px] font-bold uppercase text-tertiary">CAPTAIN</div>
+                        <div className="text-lg font-bold truncate text-primary">{captain.name}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-[8px] font-bold uppercase text-tertiary">PARTNER</div>
+                        <AnimatePresence mode="wait">
+                          <motion.div 
+                            key={partner?.id || 'pending'}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="text-lg font-bold truncate text-primary"
+                          >
+                            {partner ? partner.name : <span className="text-tertiary italic">PENDING</span>}
+                          </motion.div>
+                        </AnimatePresence>
                       </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           </div>
         </div>
 
@@ -104,29 +121,35 @@ export default function PlayoffDraft({ tournament, socket }: PlayoffDraftProps) 
         <div className="space-y-6">
           <h3 className="text-xs font-bold uppercase tracking-widest text-tertiary">Available Pool</h3>
           <div className="grid grid-cols-1 gap-2">
-            {pool.map((player) => {
-              const isPicked = (tournament.playoffTeams || []).some(t => t.partnerId === player.id);
-              
-              return (
-                <button
-                  key={player.id}
-                  disabled={isPicked || currentCaptainIdx >= captains.length}
-                  onClick={() => handlePick(player.id)}
-                  className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all ${
-                    isPicked ? 'opacity-20 border-transparent' : 'border-white/10 bg-black text-white hover:bg-black/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <span className="text-xl font-display italic font-bold">#{sortedPlayers.findIndex(p => p.id === player.id) + 1}</span>
-                    <span className="text-lg font-bold uppercase tracking-tight">{player.name}</span>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs font-bold">{player.points} PTS</div>
-                    <div className="text-[8px] font-mono text-tertiary uppercase">DIFF {player.pointDiff}</div>
-                  </div>
-                </button>
-              );
-            })}
+            <AnimatePresence mode="popLayout">
+              {pool.map((player) => {
+                const isPicked = (tournament.playoffTeams || []).some(t => t.partnerId === player.id);
+                
+                return (
+                  <motion.button
+                    key={player.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    disabled={isPicked || currentCaptainIdx >= captains.length}
+                    onClick={() => handlePick(player.id)}
+                    className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all ${
+                      isPicked ? 'opacity-20 border-transparent' : 'border-white/10 bg-black text-white hover:bg-black/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4">
+                      <span className="text-xl font-display italic font-bold">#{sortedPlayers.findIndex(p => p.id === player.id) + 1}</span>
+                      <span className="text-lg font-bold uppercase tracking-tight">{player.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs font-bold">{player.points} PTS</div>
+                      <div className="text-[8px] font-mono text-tertiary uppercase">DIFF {player.pointDiff}</div>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </AnimatePresence>
           </div>
         </div>
       </div>

@@ -31,8 +31,12 @@ CREATE TABLE IF NOT EXISTS players (
   point_diff INTEGER DEFAULT 0,
   points_scored INTEGER DEFAULT 0,
   pod_wins INTEGER DEFAULT 0,
-  last_rank INTEGER DEFAULT 0
+  last_rank INTEGER DEFAULT 0,
+  avatar_url TEXT
 );
+
+-- Ensure all columns exist for existing tables (Migrations)
+ALTER TABLE players ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
 CREATE TABLE IF NOT EXISTS rounds (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -153,8 +157,8 @@ BEGIN
   INSERT INTO tournaments (name, mode) VALUES (p_name, p_mode) RETURNING id INTO v_tournament_id;
   
   FOR v_player IN SELECT * FROM jsonb_array_elements(p_players) LOOP
-    INSERT INTO players (name, contact, dupr_id, jersey_number, tournament_id)
-    VALUES (v_player->>'name', v_player->>'contact', v_player->>'duprId', v_player->>'jerseyNumber', v_tournament_id);
+    INSERT INTO players (name, contact, dupr_id, jersey_number, tournament_id, avatar_url)
+    VALUES (v_player->>'name', v_player->>'contact', v_player->>'duprId', v_player->>'jerseyNumber', v_tournament_id, v_player->>'avatarUrl');
   END LOOP;
   
   RETURN v_tournament_id;
@@ -421,7 +425,8 @@ BEGIN
         'pointDiff', p.point_diff,
         'pointsScored', p.points_scored,
         'podWins', p.pod_wins,
-        'lastRank', p.last_rank
+        'lastRank', p.last_rank,
+        'avatarUrl', p.avatar_url
       )) FROM players p WHERE p.tournament_id = t.id
     ), '[]'::jsonb),
     'rounds', COALESCE((
@@ -476,3 +481,41 @@ BEGIN
   RETURN v_result;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 12. ROW LEVEL SECURITY (RLS)
+ALTER TABLE tournaments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE players ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rounds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pods ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pod_players ENABLE ROW LEVEL SECURITY;
+ALTER TABLE matches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE playoff_teams ENABLE ROW LEVEL SECURITY;
+ALTER TABLE playoff_matches ENABLE ROW LEVEL SECURITY;
+
+-- 13. REALTIME (Enable for all tables)
+-- This allows the Hype Board and Operator Desk to update instantly
+BEGIN;
+  DROP PUBLICATION IF EXISTS supabase_realtime;
+  CREATE PUBLICATION supabase_realtime FOR TABLE 
+    tournaments, 
+    players, 
+    rounds, 
+    pods, 
+    pod_players, 
+    matches, 
+    playoff_teams, 
+    playoff_matches;
+COMMIT;
+
+-- Basic Policies (Allow all for now, to be tightened later)
+CREATE POLICY "Allow public read access" ON tournaments FOR SELECT USING (true);
+CREATE POLICY "Allow public read access" ON players FOR SELECT USING (true);
+CREATE POLICY "Allow public read access" ON rounds FOR SELECT USING (true);
+CREATE POLICY "Allow public read access" ON pods FOR SELECT USING (true);
+CREATE POLICY "Allow public read access" ON pod_players FOR SELECT USING (true);
+CREATE POLICY "Allow public read access" ON matches FOR SELECT USING (true);
+CREATE POLICY "Allow public read access" ON playoff_teams FOR SELECT USING (true);
+CREATE POLICY "Allow public read access" ON playoff_matches FOR SELECT USING (true);
+
+-- Allow all for service role (implicit, but good to keep in mind)
+-- For the app, we'll use the service role key on the backend to bypass RLS for setup/reset

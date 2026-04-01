@@ -1,5 +1,6 @@
 import { Tournament, Match, PlayoffTeam } from '../types';
 import { Trophy } from 'lucide-react';
+import { motion } from 'motion/react';
 
 interface TournamentBracketProps {
   tournament: Tournament;
@@ -25,7 +26,13 @@ export default function TournamentBracket({ tournament }: TournamentBracketProps
             const winnerId = isLocked ? (match.score1 > match.score2 ? match.team1Id : match.team2Id) : null;
 
             return (
-              <div key={match.id} className="relative flex items-center">
+              <motion.div 
+                key={match.id} 
+                initial={{ opacity: 0, x: -50 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: idx * 0.2 }}
+                className="relative flex items-center"
+              >
                 <div className="w-64 bg-surface border-2 border-outline rounded-xl overflow-hidden shadow-md">
                   <div className={`p-3 flex justify-between items-center border-b border-outline/30 ${winnerId === match.team1Id ? 'bg-primary/10' : ''}`}>
                     <span className={`text-sm font-bold truncate ${winnerId === match.team1Id ? 'text-primary' : 'text-on-surface'}`}>
@@ -41,19 +48,39 @@ export default function TournamentBracket({ tournament }: TournamentBracketProps
                   </div>
                 </div>
                 {/* Connector to Finals */}
-                <div className="absolute -right-12 w-12 h-[2px] bg-outline-variant"></div>
+                <motion.div 
+                  initial={{ scaleX: 0 }}
+                  animate={{ scaleX: 1 }}
+                  transition={{ delay: 0.5 + idx * 0.2 }}
+                  className="absolute -right-12 w-12 h-[2px] bg-outline-variant origin-left"
+                ></motion.div>
                 {idx === 0 ? (
-                  <div className="absolute -right-12 top-1/2 w-[2px] h-[82px] bg-outline-variant"></div>
+                  <motion.div 
+                    initial={{ scaleY: 0 }}
+                    animate={{ scaleY: 1 }}
+                    transition={{ delay: 0.7 + idx * 0.2 }}
+                    className="absolute -right-12 top-1/2 w-[2px] h-[82px] bg-outline-variant origin-top"
+                  ></motion.div>
                 ) : (
-                  <div className="absolute -right-12 bottom-1/2 w-[2px] h-[82px] bg-outline-variant"></div>
+                  <motion.div 
+                    initial={{ scaleY: 0 }}
+                    animate={{ scaleY: 1 }}
+                    transition={{ delay: 0.7 + idx * 0.2 }}
+                    className="absolute -right-12 bottom-1/2 w-[2px] h-[82px] bg-outline-variant origin-bottom"
+                  ></motion.div>
                 )}
-              </div>
+              </motion.div>
             );
           })}
         </div>
 
         {/* Finals */}
-        <div className="relative flex items-center">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 1 }}
+          className="relative flex items-center"
+        >
           <div className="absolute -left-12 w-12 h-[2px] bg-outline-variant"></div>
           <div className="w-72 bg-primary p-1 rounded-2xl shadow-2xl">
             <div className="bg-surface rounded-[14px] border border-primary/20 overflow-hidden">
@@ -86,14 +113,19 @@ export default function TournamentBracket({ tournament }: TournamentBracketProps
           
           {/* Champion Display */}
           {finals?.status === 'LOCKED' && (
-            <div className="absolute -right-48 w-40 text-center animate-in fade-in slide-in-from-left-4 duration-1000">
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 1.5, duration: 1 }}
+              className="absolute -right-48 w-40 text-center"
+            >
               <div className="text-[8px] font-black uppercase tracking-[0.3em] text-primary mb-1">Champion</div>
               <div className="text-2xl font-display italic font-black uppercase text-primary leading-tight">
                 {getTeam(finals.score1 > finals.score2 ? finals.team1Id : finals.team2Id)?.name}
               </div>
-            </div>
+            </motion.div>
           )}
-        </div>
+        </motion.div>
       </div>
     </div>
   );
