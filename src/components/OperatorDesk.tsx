@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import socket from '../lib/socket';
 import { Tournament, Pod, Match, Round, Player } from '../types';
+import { tournamentService } from '../lib/tournamentService';
 import { Check, Lock, Unlock, ChevronLeft, ChevronRight, Save, Trophy, Loader2, Send, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -12,7 +12,9 @@ interface OperatorDeskProps {
 
 export default function OperatorDesk({ tournament }: OperatorDeskProps) {
   const isPlayoffs = tournament.status === 'PLAYOFFS';
-  const currentRound = !isPlayoffs ? tournament.rounds[tournament.currentRoundIndex] : null;
+  const currentRound = (!isPlayoffs && Array.isArray(tournament.rounds) && tournament.rounds.length > tournament.currentRoundIndex) 
+    ? tournament.rounds[tournament.currentRoundIndex] 
+    : null;
   
   const [selectedPodId, setSelectedPodId] = useState<string | null>(null);
   const [selectedPlayoffMatchId, setSelectedPlayoffMatchId] = useState<string | null>(null);
@@ -26,26 +28,43 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
   }, [tournament]);
 
   useEffect(() => {
-    if (!isPlayoffs && currentRound && !selectedPodId) {
-      setSelectedPodId(currentRound.pods?.[0]?.id || null);
-    } else if (isPlayoffs && (tournament.playoffMatches?.length || 0) > 0 && !selectedPlayoffMatchId) {
-      const firstPending = (tournament.playoffMatches || []).find(m => m.status === 'PENDING');
-      setSelectedPlayoffMatchId(firstPending?.id || tournament.playoffMatches?.[0]?.id || null);
+    if (!isPlayoffs && currentRound) {
+      const podExists = currentRound.pods?.some(p => p.id === selectedPodId);
+      if (!selectedPodId || !podExists) {
+        setSelectedPodId(currentRound.pods?.[0]?.id || null);
+      }
+    } else if (isPlayoffs && (tournament.playoffMatches?.length || 0) > 0) {
+      const matchExists = tournament.playoffMatches?.some(m => m.id === selectedPlayoffMatchId);
+      if (!selectedPlayoffMatchId || !matchExists) {
+        const firstPending = (tournament.playoffMatches || []).find(m => m.status === 'PENDING');
+        setSelectedPlayoffMatchId(firstPending?.id || tournament.playoffMatches?.[0]?.id || null);
+      }
     }
   }, [currentRound, selectedPodId, isPlayoffs, tournament.playoffMatches, selectedPlayoffMatchId]);
 
   const handlePodSelect = (id: string) => {
+    console.log('[OperatorDesk] Selecting pod:', id);
     setSelectedPodId(id);
     setView('SCORES');
   };
 
   const handlePlayoffMatchSelect = (id: string) => {
+    console.log('[OperatorDesk] Selecting playoff match:', id);
     setSelectedPlayoffMatchId(id);
     setView('SCORES');
   };
 
   const selectedPod = currentRound?.pods?.find(p => p.id === selectedPodId);
   const selectedPlayoffMatch = (tournament.playoffMatches || []).find(m => m.id === selectedPlayoffMatchId);
+
+  console.log('[OperatorDesk] Render state:', { 
+    isPlayoffs, 
+    view, 
+    selectedPodId, 
+    selectedPodMatches: selectedPod?.matches?.length,
+    selectedPlayoffMatchId,
+    selectedPlayoffMatch: !!selectedPlayoffMatch
+  });
 
   const handleNumpad = (num: string) => {
     if (!activeInput) return;
@@ -69,11 +88,15 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       if (side === 1) {
         setActiveInput({ matchId, side: 2 });
       } else {
-        if (!isPlayoffs) {
-          const matchIdx = selectedPod?.matches.findIndex(m => m.id === matchId) ?? -1;
-          if (matchIdx < 2) {
-            const nextMatch = selectedPod?.matches[matchIdx + 1];
-            setActiveInput({ matchId: nextMatch!.id, side: 1 });
+        if (!isPlayoffs && selectedPod) {
+          const matchIdx = selectedPod.matches?.findIndex(m => m.id === matchId) ?? -1;
+          if (matchIdx !== -1 && matchIdx < (selectedPod.matches?.length || 0) - 1) {
+            const nextMatch = selectedPod.matches[matchIdx + 1];
+            if (nextMatch) {
+              setActiveInput({ matchId: nextMatch.id, side: 1 });
+            } else {
+              setActiveInput(null);
+            }
           } else {
             setActiveInput(null);
           }
@@ -96,7 +119,7 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
     }));
   };
 
-  const handleSubmitPod = () => {
+  const handleSubmitPod = async () => {
     if (!selectedPod || !currentRound || isLoading) return;
     
     // Validate no ties
@@ -118,16 +141,19 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       status: 'LOCKED' as const
     }));
 
-    socket.emit('submit_score', {
-      podId: selectedPod.id,
-      matches
-    });
-    
-    setScores({});
-    setView('PODS');
+    try {
+      await tournamentService.submitScore(selectedPod.id, matches);
+      setScores({});
+      setView('PODS');
+    } catch (err) {
+      console.error('Submit score error:', err);
+      alert('Failed to submit scores. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleSubmitPlayoffMatch = () => {
+  const handleSubmitPlayoffMatch = async () => {
     if (!selectedPlayoffMatch || isLoading) return;
     
     const s1 = parseInt(scores[selectedPlayoffMatch.id]?.s1 || '0');
@@ -139,15 +165,17 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
     }
 
     setIsLoading(true);
-    socket.emit('submit_playoff_score', {
-      matchId: selectedPlayoffMatch.id,
-      score1: s1,
-      score2: s2
-    });
-
-    setScores({});
-    setSelectedPlayoffMatchId(null);
-    setView('PODS');
+    try {
+      await tournamentService.submitPlayoffScore(selectedPlayoffMatch.id, s1, s2);
+      setScores({});
+      setSelectedPlayoffMatchId(null);
+      setView('PODS');
+    } catch (err) {
+      console.error('Submit playoff score error:', err);
+      alert('Failed to submit playoff score. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const downloadRoundAssignments = () => {
@@ -303,13 +331,13 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
     currentY += 5;
 
     const matchData: any[] = [];
-    tournament.rounds.forEach(round => {
-      round.pods.forEach(pod => {
-        pod.matches.forEach(match => {
-          const p1 = tournament.players.find(p => p.id === match.playerIds[0]);
-          const p2 = tournament.players.find(p => p.id === match.playerIds[1]);
-          const p3 = tournament.players.find(p => p.id === match.playerIds[2]);
-          const p4 = tournament.players.find(p => p.id === match.playerIds[3]);
+    (tournament.rounds || []).forEach(round => {
+      (round.pods || []).forEach(pod => {
+        (pod.matches || []).forEach(match => {
+          const p1 = (tournament.players || []).find(p => p.id === match.playerIds[0]);
+          const p2 = (tournament.players || []).find(p => p.id === match.playerIds[1]);
+          const p3 = (tournament.players || []).find(p => p.id === match.playerIds[2]);
+          const p4 = (tournament.players || []).find(p => p.id === match.playerIds[3]);
           
           matchData.push([
             `R${round.number}`,
@@ -633,7 +661,14 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                 <div className="p-6 bg-surface-container-lowest border border-outline-variant rounded-2xl text-center space-y-2">
                   <div className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant opacity-50">Active Target</div>
                   <div className="text-sm font-mono font-bold text-on-surface">
-                    {activeInput ? `MATCH ${!isPlayoffs ? selectedPod?.matches.findIndex(m => m.id === activeInput.matchId)! + 1 : 'PLAYOFF'} — SIDE ${activeInput.side}` : 'SELECT SCORE CELL'}
+                    {activeInput ? (
+                      isPlayoffs ? `PLAYOFF MATCH — SIDE ${activeInput.side}` : (
+                        (() => {
+                          const idx = (selectedPod?.matches || []).findIndex(m => m.id === activeInput.matchId);
+                          return `MATCH ${idx !== -1 ? idx + 1 : '?'} — SIDE ${activeInput.side}`;
+                        })()
+                      )
+                    ) : 'SELECT SCORE CELL'}
                   </div>
                 </div>
               </div>

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, FormEvent, useRef } from 'react';
 import { Tournament, TournamentMode, Player } from '../types';
+import { tournamentService } from '../lib/tournamentService';
 import { v4 as uuidv4 } from 'uuid';
 import { Trash2, Plus, Play, RotateCcw, CheckCircle2, Clock, UserPlus, AlertTriangle, Upload, Camera } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Turnstile } from '@marsidev/react-turnstile';
 
 interface SetupProps {
   tournament: Tournament | null;
@@ -14,9 +14,11 @@ export default function Setup({ tournament }: SetupProps) {
   const [mode, setMode] = useState<TournamentMode>(tournament?.mode || 'MINI');
   const [players, setPlayers] = useState<Partial<Player>[]>(tournament?.players || []);
   const [isSettingUp, setIsSettingUp] = useState(false);
+  const [isLoadingTournaments, setIsLoadingTournaments] = useState(false);
   const [recentTournaments, setRecentTournaments] = useState<{ id: string, name: string, status: string, created_at: string }[]>([]);
 
   useEffect(() => {
+    console.log('[Setup] Tournament prop updated:', tournament?.id);
     if (tournament) {
       setName(tournament.name);
       setMode(tournament.mode);
@@ -27,29 +29,27 @@ export default function Setup({ tournament }: SetupProps) {
 
   const fetchRecentTournaments = async () => {
     try {
-      const response = await fetch('/api/tournaments');
-      if (response.ok) {
-        const data = await response.json();
-        setRecentTournaments(data);
-      }
+      setIsLoadingTournaments(true);
+      console.log('[Setup] Fetching recent tournaments...');
+      const data = await tournamentService.getTournaments();
+      console.log('[Setup] Recent tournaments fetched:', data?.length);
+      setRecentTournaments(data || []);
     } catch (err) {
-      console.error('Failed to fetch recent tournaments:', err);
+      console.error('[Setup] Failed to fetch recent tournaments:', err);
+    } finally {
+      setIsLoadingTournaments(false);
     }
   };
 
-  const handleLoadTournament = async (id: string) => {
-    try {
-      const response = await fetch('/api/tournament/load', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      if (response.ok) {
-        // State update will happen via socket
-      }
-    } catch (err) {
-      console.error('Failed to load tournament:', err);
-    }
+  const handleLoadTournament = (id: string) => {
+    console.log('[Setup] Switching to tournament:', id);
+    setIsSettingUp(true); // Reuse setting up state for visual feedback
+    localStorage.setItem('courtos_current_tournament_id', id);
+    
+    // Brief delay for visual feedback before refresh
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
   };
 
   const handleDeleteTournament = async (e: React.MouseEvent, id: string) => {
@@ -57,14 +57,8 @@ export default function Setup({ tournament }: SetupProps) {
     if (!confirm('Are you sure you want to delete this tournament? This action cannot be undone.')) return;
     
     try {
-      const response = await fetch('/api/tournament/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      if (response.ok) {
-        fetchRecentTournaments();
-      }
+      await tournamentService.deleteTournament(id);
+      fetchRecentTournaments();
     } catch (err) {
       console.error('Failed to delete tournament:', err);
     }
@@ -79,7 +73,6 @@ export default function Setup({ tournament }: SetupProps) {
   const [regAvatar, setRegAvatar] = useState<File | null>(null);
   const [regAvatarPreview, setRegAvatarPreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -99,41 +92,9 @@ export default function Setup({ tournament }: SetupProps) {
     if (!regName || !regJersey) return;
     
     setIsUploading(true);
-    let avatarUrl = '';
     const playerId = uuidv4();
 
     try {
-      if (regAvatar) {
-        // 1. Get presigned URL with validation fields
-        const res = await fetch('/api/upload/avatar-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            fileName: `${playerId}-${regAvatar.name}`,
-            fileType: regAvatar.type,
-            fileSize: regAvatar.size,
-            purpose: 'avatar', // User intent validation
-            tournamentId: tournament?.id || 'pending',
-            playerId: playerId
-          })
-        });
-
-        if (res.ok) {
-          const { uploadUrl, publicUrl } = await res.json();
-          
-          // 2. Upload to R2
-          const uploadRes = await fetch(uploadUrl, {
-            method: 'PUT',
-            body: regAvatar,
-            headers: { 'Content-Type': regAvatar.type }
-          });
-
-          if (uploadRes.ok) {
-            avatarUrl = publicUrl;
-          }
-        }
-      }
-
       const newPlayer: Partial<Player> = {
         id: playerId,
         name: regName,
@@ -141,7 +102,6 @@ export default function Setup({ tournament }: SetupProps) {
         email: regEmail,
         duprId: regDupr,
         jerseyNumber: regJersey,
-        avatarUrl: avatarUrl || undefined,
         points: 0,
         pointDiff: 0,
         pointsScored: 0,
@@ -157,23 +117,7 @@ export default function Setup({ tournament }: SetupProps) {
       setRegAvatar(null);
       setRegAvatarPreview(null);
     } catch (err) {
-      console.error('Failed to register player with avatar:', err);
-      alert('Failed to upload avatar. Player registered without it.');
-      
-      // Fallback: register without avatar
-      const newPlayer: Partial<Player> = {
-        id: playerId,
-        name: regName,
-        phone: regPhone,
-        email: regEmail,
-        duprId: regDupr,
-        jerseyNumber: regJersey,
-        points: 0,
-        pointDiff: 0,
-        pointsScored: 0,
-        podWins: 0
-      };
-      setPlayers([newPlayer, ...players]);
+      console.error('Failed to register player:', err);
     } finally {
       setIsUploading(false);
     }
@@ -192,43 +136,49 @@ export default function Setup({ tournament }: SetupProps) {
 
     setIsSettingUp(true);
     try {
-      const response = await fetch('/api/tournament/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          name, 
-          mode, 
-          players: players.filter(p => p.name && p.jerseyNumber).slice(0, requiredCount),
-          turnstileToken
-        }),
-      });
+      const tId = await tournamentService.setupTournament(
+        name, 
+        mode, 
+        players.filter(p => p.name && p.jerseyNumber).slice(0, requiredCount)
+      );
       
-      if (response.ok) {
-        const seedingResponse = await fetch('/api/tournament/start-seeding', { method: 'POST' });
-        if (!seedingResponse.ok) {
-          const errorData = await seedingResponse.json();
-          alert(`Failed to start seeding: ${typeof errorData.error === 'object' ? JSON.stringify(errorData.error) : (errorData.error || 'Unknown error')}`);
-        }
-      } else {
-        const errorData = await response.json();
-        alert(`Failed to setup tournament: ${typeof errorData.error === 'object' ? JSON.stringify(errorData.error) : (errorData.error || 'Unknown error')}`);
-      }
-    } catch (error) {
+      localStorage.setItem('courtos_current_tournament_id', tId);
+      
+      await tournamentService.startSeeding(tId);
+      window.location.reload();
+    } catch (error: any) {
       console.error('Setup error:', error);
-      alert('An error occurred during setup. Please check the console.');
+      alert(`An error occurred during setup: ${error.message}`);
     } finally {
       setIsSettingUp(false);
     }
   };
 
   const handleReset = async () => {
+    if (!tournament) return;
     if (confirm('Are you sure you want to reset the current tournament? This will delete all matches and pods for the current event.')) {
-      await fetch('/api/tournament/reset', { method: 'POST' });
+      try {
+        await tournamentService.resetTournament(tournament.id);
+        window.location.reload();
+      } catch (err: any) {
+        alert(`Failed to reset: ${err.message}`);
+      }
     }
   };
 
   const handleWipeAll = async () => {
-    await fetch('/api/tournament/clear-all', { method: 'POST' });
+    if (confirm('Are you sure you want to wipe ALL data? This will delete all tournaments.')) {
+      try {
+        const tournaments = await tournamentService.getTournaments();
+        for (const t of tournaments) {
+          await tournamentService.deleteTournament(t.id);
+        }
+        localStorage.removeItem('courtos_current_tournament_id');
+        window.location.reload();
+      } catch (err: any) {
+        alert(`Failed to wipe: ${err.message}`);
+      }
+    }
   };
 
   const bulkAdd = () => {
@@ -441,15 +391,9 @@ export default function Setup({ tournament }: SetupProps) {
 
             {/* Global Actions */}
             <div className="mt-16 pt-12 border-t border-outline-variant space-y-4">
-              <div className="flex justify-center mb-4">
-                <Turnstile 
-                  siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY || ''} 
-                  onSuccess={(token) => setTurnstileToken(token)}
-                />
-              </div>
               <button 
                 onClick={handleSetup}
-                disabled={isSettingUp || players.length < requiredCount || (!!tournament && tournament.status !== 'SETUP') || !turnstileToken}
+                disabled={isSettingUp || players.length < requiredCount || (!!tournament && tournament.status !== 'SETUP')}
                 className="w-full bg-primary text-on-primary py-6 rounded-xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-4 hover:bg-primary-dim shadow-2xl disabled:opacity-20 transition-all"
               >
                 {isSettingUp ? (
@@ -494,35 +438,66 @@ export default function Setup({ tournament }: SetupProps) {
                 <div className="bg-primary text-on-primary px-2 py-0.5 rounded text-[10px] font-mono">{recentTournaments.length}</div>
               </div>
               <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
-                {recentTournaments.map((t) => (
-                  <div key={t.id} className="relative group">
-                    <button
-                      onClick={() => handleLoadTournament(t.id)}
-                      className={`w-full text-left p-3 rounded-xl border transition-all ${
-                        tournament?.id === t.id 
-                          ? 'bg-primary text-on-primary border-primary' 
-                          : 'bg-black text-white border-white/20 hover:bg-black/80'
-                      }`}
-                    >
-                      <div className="flex justify-between items-start mb-1">
-                        <div className="text-xs font-black uppercase tracking-tight text-on-surface truncate pr-8">{t.name}</div>
-                        <div className={`text-[8px] font-mono px-1.5 py-0.5 rounded ${
-                          t.status === 'FINISHED' ? 'bg-green-500/20 text-green-500' : 'bg-blue-500/20 text-blue-500'
-                        }`}>{t.status}</div>
-                      </div>
-                      <div className="text-[8px] font-mono text-on-surface-variant opacity-50 uppercase">
-                        {new Date(t.created_at).toLocaleDateString()} // {t.id.slice(0, 8)}
-                      </div>
-                    </button>
-                    <button
-                      onClick={(e) => handleDeleteTournament(e, t.id)}
-                      className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1 text-secondary hover:bg-secondary-container/10 rounded transition-all"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                {isLoadingTournaments && recentTournaments.length === 0 ? (
+                  <div className="py-12 flex flex-col items-center justify-center space-y-4 opacity-40">
+                    <Clock className="w-8 h-8 animate-spin" />
+                    <div className="text-[10px] font-black uppercase tracking-widest">Synchronizing...</div>
                   </div>
-                ))}
-                {recentTournaments.length === 0 && (
+                ) : (
+                  Array.isArray(recentTournaments) && recentTournaments.map((t) => (
+                    <div key={t.id} className="relative group">
+                      <button
+                        onClick={() => handleLoadTournament(t.id)}
+                        className={`w-full text-left p-4 rounded-xl border-2 transition-all duration-300 ${
+                          tournament?.id === t.id 
+                            ? 'bg-black text-white border-black shadow-xl scale-[1.02]' 
+                            : 'bg-white text-black border-outline hover:border-black/20 hover:bg-surface-container-low'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex flex-col min-w-0">
+                            {tournament?.id === t.id && (
+                              <div className="text-[8px] font-black uppercase tracking-widest text-blue-400 mb-1 flex items-center gap-1">
+                                <div className="w-1 h-1 rounded-full bg-blue-400 animate-pulse" />
+                                Active Session
+                              </div>
+                            )}
+                            <div className={`text-sm font-black uppercase tracking-tight truncate pr-2 ${
+                              tournament?.id === t.id ? 'text-white' : 'text-black'
+                            }`}>
+                              {t.name}
+                            </div>
+                          </div>
+                          <div className={`text-[9px] font-mono px-2 py-0.5 rounded-full border shrink-0 ${
+                            t.status === 'FINISHED' 
+                              ? (tournament?.id === t.id ? 'bg-green-500/20 border-green-500/40 text-green-300' : 'bg-green-500/10 border-green-500/30 text-green-600')
+                              : (tournament?.id === t.id ? 'bg-blue-500/20 border-blue-500/40 text-blue-300' : 'bg-blue-500/10 border-blue-500/30 text-blue-600')
+                          }`}>
+                            {t.status}
+                          </div>
+                        </div>
+                        <div className={`text-[10px] font-mono uppercase flex items-center gap-2 ${
+                          tournament?.id === t.id ? 'text-white/60' : 'text-black/40'
+                        }`}>
+                          <span>{new Date(t.created_at).toLocaleDateString()}</span>
+                          <span className="opacity-30">|</span>
+                          <span className="font-bold">ID: {t.id.slice(0, 8)}</span>
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteTournament(e, t.id)}
+                        className={`absolute top-4 right-4 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${
+                          tournament?.id === t.id 
+                            ? 'text-white/40 hover:text-white hover:bg-white/20' 
+                            : 'text-black/20 hover:text-red-600 hover:bg-red-50/50'
+                        }`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+                {!isLoadingTournaments && recentTournaments.length === 0 && (
                   <div className="py-8 text-center opacity-20">
                     <div className="text-[10px] font-black uppercase tracking-widest text-on-surface">NO HISTORY</div>
                   </div>
@@ -537,7 +512,7 @@ export default function Setup({ tournament }: SetupProps) {
             </div>
             <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto">
               <AnimatePresence mode="popLayout">
-                {players.map((p) => (
+                {Array.isArray(players) && players.map((p) => (
                   <motion.div 
                     key={p.id}
                     layout

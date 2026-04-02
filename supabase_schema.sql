@@ -508,14 +508,14 @@ BEGIN;
 COMMIT;
 
 -- Basic Policies (Allow all for now, to be tightened later)
-CREATE POLICY "Allow public read access" ON tournaments FOR SELECT USING (true);
-CREATE POLICY "Allow public read access" ON players FOR SELECT USING (true);
-CREATE POLICY "Allow public read access" ON rounds FOR SELECT USING (true);
-CREATE POLICY "Allow public read access" ON pods FOR SELECT USING (true);
-CREATE POLICY "Allow public read access" ON pod_players FOR SELECT USING (true);
-CREATE POLICY "Allow public read access" ON matches FOR SELECT USING (true);
-CREATE POLICY "Allow public read access" ON playoff_teams FOR SELECT USING (true);
-CREATE POLICY "Allow public read access" ON playoff_matches FOR SELECT USING (true);
+CREATE POLICY "Allow public all access" ON tournaments FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access" ON players FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access" ON rounds FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access" ON pods FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access" ON pod_players FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access" ON matches FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access" ON playoff_teams FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access" ON playoff_matches FOR ALL USING (true) WITH CHECK (true);
 
 -- Allow all for service role (implicit, but good to keep in mind)
 -- For the app, we'll use the service role key on the backend to bypass RLS for setup/reset

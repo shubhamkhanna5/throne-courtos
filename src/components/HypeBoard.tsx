@@ -17,11 +17,11 @@ interface HypeBoardProps {
 }
 
 export default function HypeBoard({ tournament }: HypeBoardProps) {
-  const sortedPlayers = [...tournament.players].sort((a, b) => {
+  const sortedPlayers = Array.isArray(tournament.players) ? [...tournament.players].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
     if (b.pointDiff !== a.pointDiff) return b.pointDiff - a.pointDiff;
     return b.pointsScored - a.pointsScored;
-  });
+  }) : [];
 
   const cutLine = 8;
 

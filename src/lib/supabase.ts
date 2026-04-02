@@ -14,12 +14,16 @@ if (isValid(supabaseUrl) && isValid(supabaseAnonKey)) {
     // Diagnostic log (masked)
     console.log('Initializing Supabase client with URL:', supabaseUrl.substring(0, 10) + '...');
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
+    console.log('Supabase client initialized successfully');
   } catch (err) {
     console.error('Supabase client initialization failed:', err);
     supabaseInstance = null;
   }
 } else {
-  console.warn('Supabase credentials missing or invalid in environment.');
+  console.warn('Supabase credentials missing or invalid in environment.', {
+    urlLength: supabaseUrl?.length,
+    keyLength: supabaseAnonKey?.length
+  });
 }
 
 export const supabase = supabaseInstance;

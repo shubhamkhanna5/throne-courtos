@@ -1,16 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Tournament, Player, PlayoffTeam } from '../types';
+import { tournamentService } from '../lib/tournamentService';
 import { Trophy, Users, Check, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Socket } from 'socket.io-client';
 import TournamentBracket from './TournamentBracket';
 
 interface PlayoffDraftProps {
   tournament: Tournament;
-  socket: Socket;
 }
 
-export default function PlayoffDraft({ tournament, socket }: PlayoffDraftProps) {
+export default function PlayoffDraft({ tournament }: PlayoffDraftProps) {
   const [isLoading, setIsLoading] = useState(false);
   const cutLine = 8;
   const sortedPlayers = [...tournament.players].sort((a, b) => {
@@ -32,13 +31,16 @@ export default function PlayoffDraft({ tournament, socket }: PlayoffDraftProps) 
     setIsLoading(false);
   }, [tournament]);
 
-  const handlePick = (playerId: string) => {
-    if (isLoading) return;
+  const handlePick = async (playerId: string) => {
+    if (isLoading || !tournament) return;
     setIsLoading(true);
-    socket.emit('draft_partner', {
-      captainId: currentCaptain.id,
-      partnerId: playerId
-    });
+    try {
+      await tournamentService.draftPartner(tournament.id, currentCaptain.id, playerId);
+    } catch (err) {
+      console.error('Draft partner error:', err);
+      alert('Failed to draft partner. Please try again.');
+      setIsLoading(false);
+    }
   };
 
   if (hasMatches) {
