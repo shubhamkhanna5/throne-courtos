@@ -43,13 +43,10 @@ export default function Setup({ tournament }: SetupProps) {
 
   const handleLoadTournament = (id: string) => {
     console.log('[Setup] Switching to tournament:', id);
-    setIsSettingUp(true); // Reuse setting up state for visual feedback
     localStorage.setItem('courtos_current_tournament_id', id);
-    
-    // Brief delay for visual feedback before refresh
     setTimeout(() => {
-      window.location.reload();
-    }, 500);
+      window.location.href = window.location.href;
+    }, 5000);
   };
 
   const handleDeleteTournament = async (e: React.MouseEvent, id: string) => {
@@ -58,7 +55,9 @@ export default function Setup({ tournament }: SetupProps) {
     
     try {
       await tournamentService.deleteTournament(id);
-      fetchRecentTournaments();
+      setTimeout(() => {
+        window.location.href = window.location.href;
+      }, 5000);
     } catch (err) {
       console.error('Failed to delete tournament:', err);
     }
@@ -145,7 +144,9 @@ export default function Setup({ tournament }: SetupProps) {
       localStorage.setItem('courtos_current_tournament_id', tId);
       
       await tournamentService.startSeeding(tId);
-      window.location.reload();
+      setTimeout(() => {
+        window.location.href = window.location.href;
+      }, 5000);
     } catch (error: any) {
       console.error('Setup error:', error);
       alert(`An error occurred during setup: ${error.message}`);
@@ -159,7 +160,9 @@ export default function Setup({ tournament }: SetupProps) {
     if (confirm('Are you sure you want to reset the current tournament? This will delete all matches and pods for the current event.')) {
       try {
         await tournamentService.resetTournament(tournament.id);
-        window.location.reload();
+        setTimeout(() => {
+          window.location.href = window.location.href;
+        }, 5000);
       } catch (err: any) {
         alert(`Failed to reset: ${err.message}`);
       }
@@ -174,7 +177,9 @@ export default function Setup({ tournament }: SetupProps) {
           await tournamentService.deleteTournament(t.id);
         }
         localStorage.removeItem('courtos_current_tournament_id');
-        window.location.reload();
+        setTimeout(() => {
+          window.location.href = window.location.href;
+        }, 5000);
       } catch (err: any) {
         alert(`Failed to wipe: ${err.message}`);
       }

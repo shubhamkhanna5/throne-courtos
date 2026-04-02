@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Tournament, Pod, Match, Round, Player } from '../types';
 import { tournamentService } from '../lib/tournamentService';
-import { Check, Lock, Unlock, ChevronLeft, ChevronRight, Save, Trophy, Loader2, Send, Download } from 'lucide-react';
+import { Check, Lock, Unlock, ChevronLeft, ChevronRight, Save, Trophy, Loader2, Send, Download, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -21,7 +21,30 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
   const [scores, setScores] = useState<Record<string, { s1: string, s2: string }>>({});
   const [activeInput, setActiveInput] = useState<{ matchId: string, side: 1 | 2 } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isAdvancing, setIsAdvancing] = useState(false);
   const [view, setView] = useState<'PODS' | 'SCORES'>('PODS');
+  const scoreRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  // Load scores from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(`courtos_scores_${tournament.id}`);
+    if (saved) {
+      try {
+        setScores(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse saved scores', e);
+      }
+    }
+  }, [tournament.id]);
+
+  // Save scores to localStorage whenever they change
+  useEffect(() => {
+    if (Object.keys(scores).length > 0) {
+      localStorage.setItem(`courtos_scores_${tournament.id}`, JSON.stringify(scores));
+    } else {
+      localStorage.removeItem(`courtos_scores_${tournament.id}`);
+    }
+  }, [scores, tournament.id]);
 
   useEffect(() => {
     setIsLoading(false);
@@ -41,6 +64,24 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       }
     }
   }, [currentRound, selectedPodId, isPlayoffs, tournament.playoffMatches, selectedPlayoffMatchId]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (view !== 'SCORES' || !activeInput) return;
+
+      if (e.key >= '0' && e.key <= '9') {
+        handleNumpad(e.key);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        advanceInput(activeInput.matchId, activeInput.side);
+      } else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === 'c' || e.key === 'C') {
+        clearInput();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view, activeInput, scores]);
 
   const handlePodSelect = (id: string) => {
     console.log('[OperatorDesk] Selecting pod:', id);
@@ -83,28 +124,50 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       }
     }));
 
-    // Auto-advance logic
-    if (nextValue.length >= 2 || (parseInt(nextValue) >= 2 && nextValue.length >= 1)) {
-      if (side === 1) {
-        setActiveInput({ matchId, side: 2 });
-      } else {
-        if (!isPlayoffs && selectedPod) {
-          const matchIdx = selectedPod.matches?.findIndex(m => m.id === matchId) ?? -1;
-          if (matchIdx !== -1 && matchIdx < (selectedPod.matches?.length || 0) - 1) {
-            const nextMatch = selectedPod.matches[matchIdx + 1];
-            if (nextMatch) {
-              setActiveInput({ matchId: nextMatch.id, side: 1 });
-            } else {
-              setActiveInput(null);
-            }
+    // Auto-advance logic: 
+    // 1. If it's 2 digits, it's definitely complete (max is 15 or 11)
+    // 2. If it's 1 digit and that digit is > 1, it's complete because 20+ or 12+ is impossible
+    const val = parseInt(nextValue);
+    const isComplete = nextValue.length >= 2 || (nextValue.length === 1 && val > 1);
+    
+    if (isComplete) {
+      advanceInput(matchId, side);
+    }
+  };
+
+  const advanceInput = (matchId: string, side: number) => {
+    let nextMatchId = matchId;
+    let nextSide = side === 1 ? 2 : 1;
+
+    if (side === 2) {
+      if (!isPlayoffs && selectedPod) {
+        const matchIdx = selectedPod.matches?.findIndex(m => m.id === matchId) ?? -1;
+        if (matchIdx !== -1 && matchIdx < (selectedPod.matches?.length || 0) - 1) {
+          const nextMatch = selectedPod.matches[matchIdx + 1];
+          if (nextMatch) {
+            nextMatchId = nextMatch.id;
+            nextSide = 1;
           } else {
             setActiveInput(null);
+            return;
           }
         } else {
           setActiveInput(null);
+          return;
         }
+      } else {
+        setActiveInput(null);
+        return;
       }
     }
+
+    setActiveInput({ matchId: nextMatchId, side: nextSide as 1 | 2 });
+    
+    // Focus the next input
+    const nextRefKey = `${nextMatchId}-${nextSide}`;
+    setTimeout(() => {
+      scoreRefs.current[nextRefKey]?.focus();
+    }, 10);
   };
 
   const clearInput = () => {
@@ -135,6 +198,12 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       return;
     }
 
+    const incompleteMatch = matchesWithScores.some(m => m.score1 < 15 && m.score2 < 15);
+    if (incompleteMatch) {
+      alert('Each match must have a winner with 15 points.');
+      return;
+    }
+
     setIsLoading(true);
     const matches = matchesWithScores.map(m => ({
       ...m,
@@ -142,9 +211,11 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
     }));
 
     try {
-      await tournamentService.submitScore(selectedPod.id, matches);
+      await tournamentService.submitScore(selectedPod.id, matches, tournament.id);
       setScores({});
       setView('PODS');
+      // Removed hard refresh after score submission as it was causing UI reset issues.
+      // Realtime listeners in App.tsx will handle the data update.
     } catch (err) {
       console.error('Submit score error:', err);
       alert('Failed to submit scores. Please try again.');
@@ -164,17 +235,45 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       return;
     }
 
+    if (s1 < 11 && s2 < 11) {
+      alert('The match must have a winner with 11 points.');
+      return;
+    }
+
     setIsLoading(true);
     try {
       await tournamentService.submitPlayoffScore(selectedPlayoffMatch.id, s1, s2);
       setScores({});
       setSelectedPlayoffMatchId(null);
       setView('PODS');
+      // Removed hard refresh after score submission.
     } catch (err) {
       console.error('Submit playoff score error:', err);
       alert('Failed to submit playoff score. Please try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAdvanceRound = async () => {
+    if (!tournament || isAdvancing) return;
+    
+    const allPodsLocked = !currentRound || currentRound.pods?.every(p => p.status === 'LOCKED');
+    if (!allPodsLocked) {
+      if (!confirm('Not all pods are locked. Are you sure you want to complete this phase?')) return;
+    }
+
+    setIsAdvancing(true);
+    try {
+      await tournamentService.advanceRound(tournament.id);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (err) {
+      console.error('Advance round error:', err);
+      alert(err instanceof Error ? err.message : 'Failed to advance round. Please try again.');
+    } finally {
+      setIsAdvancing(false);
     }
   };
 
@@ -374,7 +473,6 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       </div>
     );
   }
-  if (isPlayoffs && (tournament.playoffMatches || []).length === 0) return <div className="text-center p-12 opacity-50">DRAFT IN PROGRESS...</div>;
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -400,6 +498,21 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
         </div>
         
         <div className="flex gap-2">
+          {((!isPlayoffs && currentRound) || (isPlayoffs && (tournament.playoffMatches || []).length === 0)) && (
+            <button
+              onClick={handleAdvanceRound}
+              disabled={isAdvancing}
+              className={`px-6 py-2 rounded-full font-black uppercase tracking-widest text-xs transition-all shadow-lg flex items-center gap-2 ${
+                isAdvancing ? 'bg-outline-variant cursor-not-allowed' : 'bg-primary text-on-primary hover:bg-primary-dim'
+              }`}
+            >
+              {isAdvancing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              {tournament.status === 'SEEDING' ? 'Complete Seeding' : 
+               tournament.status === 'PLAYOFFS' ? 'Start Playoff Matches' :
+               tournament.currentRoundIndex === 3 ? 'Choose Team Mates' : 
+               `Complete Ladder ${tournament.currentRoundIndex}`}
+            </button>
+          )}
           <button
             onClick={downloadResults}
             className="p-2 bg-surface-container-low border border-outline rounded-full hover:bg-surface-container transition-all text-on-surface"
@@ -443,29 +556,37 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                 </button>
               ))
             ) : (
-              (tournament.playoffMatches || []).map((match) => {
-                const t1 = (tournament.playoffTeams || []).find(t => t.id === match.team1Id);
-                const t2 = (tournament.playoffTeams || []).find(t => t.id === match.team2Id);
-                return (
-                  <button
-                    key={match.id}
-                    onClick={() => handlePlayoffMatchSelect(match.id)}
-                    className={`p-6 rounded-2xl flex flex-col items-center justify-center border-2 transition-all space-y-4 ${
-                      match.status === 'LOCKED' 
-                        ? 'bg-surface-container-lowest border-outline-variant opacity-60' 
-                        : 'bg-surface border-outline hover:border-primary hover:scale-[1.02] shadow-sm hover:shadow-md'
-                    }`}
-                  >
-                    <div className="w-12 h-12 rounded-full bg-surface-container-high flex items-center justify-center">
-                      {match.status === 'LOCKED' ? <Lock className="w-6 h-6 text-on-surface-variant" /> : <Trophy className="w-6 h-6 text-primary" />}
-                    </div>
-                    <div className="text-center">
-                      <div className="text-[10px] uppercase font-black tracking-widest text-on-surface-variant mb-1">{match.stage}</div>
-                      <div className="text-xl font-black">{t1?.name || 'TBD'} vs {t2?.name || 'TBD'}</div>
-                    </div>
-                  </button>
-                );
-              })
+              (tournament.playoffMatches || []).length > 0 ? (
+                (tournament.playoffMatches || []).map((match) => {
+                  const t1 = (tournament.playoffTeams || []).find(t => t.id === match.team1Id);
+                  const t2 = (tournament.playoffTeams || []).find(t => t.id === match.team2Id);
+                  return (
+                    <button
+                      key={match.id}
+                      onClick={() => handlePlayoffMatchSelect(match.id)}
+                      className={`p-6 rounded-2xl flex flex-col items-center justify-center border-2 transition-all space-y-4 ${
+                        match.status === 'LOCKED' 
+                          ? 'bg-surface-container-lowest border-outline-variant opacity-60' 
+                          : 'bg-surface border-outline hover:border-primary hover:scale-[1.02] shadow-sm hover:shadow-md'
+                      }`}
+                    >
+                      <div className="w-12 h-12 rounded-full bg-surface-container-high flex items-center justify-center">
+                        {match.status === 'LOCKED' ? <Lock className="w-6 h-6 text-on-surface-variant" /> : <Trophy className="w-6 h-6 text-primary" />}
+                      </div>
+                      <div className="text-center">
+                        <div className="text-[10px] uppercase font-black tracking-widest text-on-surface-variant mb-1">{match.stage}</div>
+                        <div className="text-xl font-black">{t1?.name || 'TBD'} vs {t2?.name || 'TBD'}</div>
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="col-span-full py-24 text-center space-y-4 opacity-50">
+                  <Clock className="w-12 h-12 mx-auto" />
+                  <div className="text-xl font-black uppercase tracking-widest">Draft in Progress</div>
+                  <p className="text-sm max-w-xs mx-auto">Playoff matches will appear here once the draft is finalized and matches are generated.</p>
+                </div>
+              )
             )}
             
             {/* Round Actions */}
@@ -534,7 +655,9 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
 
                             <div className="flex items-center gap-4">
                               <button 
+                                ref={el => { scoreRefs.current[`${match.id}-1`] = el; }}
                                 onClick={() => setActiveInput({ matchId: match.id, side: 1 })}
+                                onFocus={() => setActiveInput({ matchId: match.id, side: 1 })}
                                 className={`w-20 h-24 rounded-2xl border-4 flex items-center justify-center text-4xl font-mono font-black transition-all ${
                                   activeInput?.matchId === match.id && activeInput?.side === 1
                                     ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
@@ -547,7 +670,9 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                               <div className="text-2xl editorial-title text-on-surface-variant opacity-20 font-black italic">VS</div>
 
                               <button 
+                                ref={el => { scoreRefs.current[`${match.id}-2`] = el; }}
                                 onClick={() => setActiveInput({ matchId: match.id, side: 2 })}
+                                onFocus={() => setActiveInput({ matchId: match.id, side: 2 })}
                                 className={`w-20 h-24 rounded-2xl border-4 flex items-center justify-center text-4xl font-mono font-black transition-all ${
                                   activeInput?.matchId === match.id && activeInput?.side === 2
                                     ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
@@ -590,7 +715,9 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
 
                         <div className="flex items-center gap-4">
                           <button 
+                            ref={el => { scoreRefs.current[`${selectedPlayoffMatch.id}-1`] = el; }}
                             onClick={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 1 })}
+                            onFocus={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 1 })}
                             className={`w-24 h-32 rounded-2xl border-4 flex items-center justify-center text-5xl font-mono font-black transition-all ${
                               activeInput?.matchId === selectedPlayoffMatch.id && activeInput?.side === 1
                                 ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
@@ -603,7 +730,9 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                           <div className="text-3xl editorial-title text-on-surface-variant opacity-20 font-black italic">VS</div>
 
                           <button 
+                            ref={el => { scoreRefs.current[`${selectedPlayoffMatch.id}-2`] = el; }}
                             onClick={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 2 })}
+                            onFocus={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 2 })}
                             className={`w-24 h-32 rounded-2xl border-4 flex items-center justify-center text-5xl font-mono font-black transition-all ${
                               activeInput?.matchId === selectedPlayoffMatch.id && activeInput?.side === 2
                                 ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
@@ -639,16 +768,18 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
             <div className="lg:col-span-4">
               <div className="bg-surface p-8 rounded-3xl border border-outline sticky top-24 shadow-xl space-y-8">
                 <div className="grid grid-cols-3 gap-4">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, 'OK'].map((key) => (
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, 'NEXT'].map((key) => (
                     <button
                       key={key}
                       onClick={() => {
                         if (key === 'C') clearInput();
-                        else if (key === 'OK') setActiveInput(null);
+                        else if (key === 'NEXT') {
+                          if (activeInput) advanceInput(activeInput.matchId, activeInput.side);
+                        }
                         else handleNumpad(key.toString());
                       }}
                       className={`h-20 rounded-2xl flex items-center justify-center text-3xl font-black transition-all active:scale-95 ${
-                        key === 'OK' ? 'bg-primary text-on-primary col-span-1' : 
+                        key === 'NEXT' ? 'bg-primary text-on-primary col-span-1 text-xl' : 
                         key === 'C' ? 'bg-secondary text-on-secondary' : 
                         'bg-surface-container-low hover:bg-surface-container text-on-surface border border-outline-variant'
                       }`}

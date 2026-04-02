@@ -24,6 +24,55 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
   }) : [];
 
   const cutLine = 8;
+  const isPlayoffs = tournament.status === 'PLAYOFFS' || tournament.status === 'FINISHED';
+
+  // Calculate Top 3 Teams for Podium
+  const getTop3Teams = () => {
+    if (!isPlayoffs || !tournament.playoffMatches) return null;
+
+    const finals = tournament.playoffMatches.find(m => m.stage === 'FINALS');
+    const semis = tournament.playoffMatches.filter(m => m.stage === 'SEMIS');
+
+    if (!finals || semis.length < 2) return null;
+
+    let first = null;
+    let second = null;
+    let third = null;
+
+    // 1st and 2nd from Finals
+    if (finals.status === 'LOCKED') {
+      if (finals.score1 > finals.score2) {
+        first = tournament.playoffTeams.find(t => t.id === finals.team1Id);
+        second = tournament.playoffTeams.find(t => t.id === finals.team2Id);
+      } else {
+        first = tournament.playoffTeams.find(t => t.id === finals.team2Id);
+        second = tournament.playoffTeams.find(t => t.id === finals.team1Id);
+      }
+    }
+
+    // 3rd from Semis Losers
+    const semiLosers = semis
+      .filter(s => s.status === 'LOCKED')
+      .map(s => s.score1 > s.score2 ? s.team2Id : s.team1Id)
+      .map(id => tournament.playoffTeams.find(t => t.id === id))
+      .filter(Boolean);
+
+    if (semiLosers.length > 0) {
+      // Rank semi losers by their captains' leaderboard stats
+      third = semiLosers.sort((a, b) => {
+        const pA = tournament.players.find(p => p.id === a?.captainId);
+        const pB = tournament.players.find(p => p.id === b?.captainId);
+        if (!pA || !pB) return 0;
+        if (pB.points !== pA.points) return pB.points - pA.points;
+        if (pB.pointDiff !== pA.pointDiff) return pB.pointDiff - pA.pointDiff;
+        return pB.pointsScored - pA.pointsScored;
+      })[0];
+    }
+
+    return { first, second, third };
+  };
+
+  const top3 = getTop3Teams();
 
   return (
     <div className="space-y-12 px-4 sm:px-6 lg:px-8 py-12">
@@ -44,6 +93,71 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
           <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-primary" /> ROUND {tournament.currentRoundIndex + 1} / 4</span>
           <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-on-tertiary-fixed-variant" /> {tournament.status}</span>
         </div>
+
+        {/* Podium Section */}
+        {top3 && (top3.first || top3.second || top3.third) && (
+          <div className="max-w-4xl mx-auto pt-12 pb-8">
+            <div className="flex items-end justify-center gap-4 sm:gap-8">
+              {/* 2nd Place */}
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="flex flex-col items-center gap-4 w-1/3 max-w-[200px]"
+              >
+                <div className="text-center">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant mb-2">Silver</div>
+                  <div className="text-sm font-black truncate w-full px-2">{top3.second?.name || 'TBD'}</div>
+                </div>
+                <div className="w-full h-32 sm:h-40 bg-surface-container-high rounded-t-2xl border-x-2 border-t-2 border-outline-variant flex flex-col items-center justify-center relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
+                  <Trophy className="w-8 h-8 text-on-surface-variant/40 mb-2" />
+                  <span className="text-4xl font-black text-on-surface-variant/20">2</span>
+                </div>
+              </motion.div>
+
+              {/* 1st Place */}
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex flex-col items-center gap-4 w-1/3 max-w-[240px]"
+              >
+                <div className="text-center">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-tertiary mb-2">Champion</div>
+                  <div className="text-lg font-black truncate w-full px-2">{top3.first?.name || 'TBD'}</div>
+                </div>
+                <div className="w-full h-48 sm:h-60 bg-primary rounded-t-2xl border-x-2 border-t-2 border-primary flex flex-col items-center justify-center relative overflow-hidden shadow-2xl group">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                  <motion.div
+                    animate={{ rotate: [0, -10, 10, -10, 0] }}
+                    transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                  >
+                    <Trophy className="w-12 h-12 text-on-primary mb-2" />
+                  </motion.div>
+                  <span className="text-6xl font-black text-on-primary/20">1</span>
+                </div>
+              </motion.div>
+
+              {/* 3rd Place */}
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="flex flex-col items-center gap-4 w-1/3 max-w-[200px]"
+              >
+                <div className="text-center">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant mb-2">Bronze</div>
+                  <div className="text-sm font-black truncate w-full px-2">{top3.third?.name || 'TBD'}</div>
+                </div>
+                <div className="w-full h-24 sm:h-32 bg-surface-container-low rounded-t-2xl border-x-2 border-t-2 border-outline-variant flex flex-col items-center justify-center relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
+                  <Trophy className="w-6 h-6 text-on-surface-variant/30 mb-2" />
+                  <span className="text-3xl font-black text-on-surface-variant/10">3</span>
+                </div>
+              </motion.div>
+            </div>
+          </div>
+        )}
 
         {/* Ranking Priority Notice */}
         <div className="max-w-md mx-auto p-4 bg-surface-container-low border border-outline-variant rounded-xl">
@@ -77,17 +191,20 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
             const delta = player.lastRank ? player.lastRank - rank : 0;
 
             return (
-              <React.Fragment key={player.id}>
-                <motion.div 
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ 
-                    type: "spring",
-                    stiffness: 300,
-                    damping: 30
-                  }}
+              <motion.div 
+                key={player.id}
+                layout
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ 
+                  type: "spring",
+                  stiffness: 300,
+                  damping: 30
+                }}
+                className="relative"
+              >
+                <div 
                   className={`group flex items-center gap-4 p-4 border-b border-outline-variant transition-all hover:bg-primary hover:text-on-primary bg-surface rounded-lg relative ${
                     isQualified ? 'border-l-4 border-l-primary' : 'opacity-80 grayscale-[0.5]'
                   }`}
@@ -156,7 +273,7 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                       <span className="text-[8px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase">SCR</span>
                     </div>
                   </div>
-                </motion.div>
+                </div>
 
                 {/* Cut Line Visual */}
                 {rank === cutLine && (
@@ -171,7 +288,7 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                     </div>
                   </div>
                 )}
-              </React.Fragment>
+              </motion.div>
             );
           })}
         </AnimatePresence>

@@ -94,13 +94,13 @@ function AppContent() {
         if (data.id) {
           localStorage.setItem('courtos_current_tournament_id', data.id);
         }
-      } else {
+      } else if (!silent) {
         console.warn('[App] No tournament data returned, setting state to null');
         setTournament(null);
       }
     } catch (err) {
-      console.error('[App] Initial fetch failed:', err);
-      setTournament(null);
+      console.error('[App] fetchState failed:', err);
+      if (!silent) setTournament(null);
     } finally {
       console.log('[App] fetchState completed, setting isLoading to false');
       setIsLoading(false);
@@ -181,42 +181,8 @@ function AppContent() {
     };
   }, [tournament?.id]);
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white space-y-8 p-4">
-        <div className="relative">
-          <Trophy className="w-20 h-20 animate-bounce text-white/20" />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-12 h-12 border-4 border-white/10 border-t-white rounded-full animate-spin" />
-          </div>
-        </div>
-        
-        <div className="space-y-4 text-center max-w-xs">
-          <div className="space-y-1">
-            <div className="text-3xl font-display italic font-black uppercase tracking-tighter">CourtOS</div>
-            <div className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-white/40">Initializing System // Synchronizing Data</div>
-          </div>
-          
-          <div className="pt-8 flex flex-col gap-3">
-            <p className="text-[10px] font-mono text-white/20">Connection taking longer than expected...</p>
-            <button 
-              onClick={() => fetchState()}
-              className="px-6 py-2 bg-white/5 border border-white/10 rounded-lg text-[10px] font-mono font-bold uppercase tracking-widest hover:bg-white/10 transition-all"
-            >
-              Retry Connection
-            </button>
-            <button 
-              onClick={() => setIsLoading(false)}
-              className="text-[10px] font-mono text-white/40 underline underline-offset-4 hover:text-white transition-colors"
-            >
-              Force Load UI
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // Removed full-screen loading screen as per user request
+  
   const handleProtectedLink = (e: React.MouseEvent, path: string) => {
     if (!isAuth) {
       e.preventDefault();
@@ -246,7 +212,9 @@ function AppContent() {
     localStorage.removeItem('courtos_is_auth');
     setUserType(null);
     localStorage.removeItem('courtos_user_type');
-    navigate('/');
+    setTimeout(() => {
+      window.location.href = '/';
+    }, 5000);
   };
 
   const navItems = [
@@ -336,6 +304,15 @@ function AppContent() {
                         navigate('/admin');
                       } else {
                         setShowPinModal({ target: '/admin' });
+                      }
+                    }}
+                    onScoreEntry={() => {
+                      if (isAuth) {
+                        setUserType('ADMIN');
+                        localStorage.setItem('courtos_user_type', 'ADMIN');
+                        navigate('/operator');
+                      } else {
+                        setShowPinModal({ target: '/operator' });
                       }
                     }}
                     onSearchPlayers={() => {

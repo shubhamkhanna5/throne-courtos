@@ -26,6 +26,7 @@ export default function PlayoffDraft({ tournament }: PlayoffDraftProps) {
   const currentCaptain = captains[currentCaptainIdx];
 
   const hasMatches = (tournament.playoffMatches || []).length > 0;
+  const isDraftComplete = currentCaptainIdx >= captains.length && !hasMatches;
 
   useEffect(() => {
     setIsLoading(false);
@@ -36,9 +37,27 @@ export default function PlayoffDraft({ tournament }: PlayoffDraftProps) {
     setIsLoading(true);
     try {
       await tournamentService.draftPartner(tournament.id, currentCaptain.id, playerId);
+      setTimeout(() => {
+        window.location.href = window.location.href;
+      }, 5000);
     } catch (err) {
       console.error('Draft partner error:', err);
       alert('Failed to draft partner. Please try again.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleFinalizeDraft = async () => {
+    if (isLoading || !tournament) return;
+    setIsLoading(true);
+    try {
+      await tournamentService.advanceRound(tournament.id);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (err) {
+      console.error('Finalize draft error:', err);
+      alert(err instanceof Error ? err.message : 'Failed to finalize draft. Please try again.');
       setIsLoading(false);
     }
   };
@@ -121,7 +140,19 @@ export default function PlayoffDraft({ tournament }: PlayoffDraftProps) {
 
         {/* Available Pool */}
         <div className="space-y-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-tertiary">Available Pool</h3>
+          <div className="flex justify-between items-center">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-tertiary">Available Pool</h3>
+            {isDraftComplete && (
+              <button
+                onClick={handleFinalizeDraft}
+                disabled={isLoading}
+                className="px-4 py-2 bg-primary text-surface rounded-lg font-black uppercase tracking-widest text-[10px] hover:bg-primary-dim shadow-lg transition-all flex items-center gap-2"
+              >
+                {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                Finalize Draft
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-1 gap-2">
             <AnimatePresence mode="popLayout">
               {pool.map((player) => {
@@ -146,7 +177,7 @@ export default function PlayoffDraft({ tournament }: PlayoffDraftProps) {
                     </div>
                     <div className="text-right">
                       <div className="text-xs font-bold">{player.points} PTS</div>
-                      <div className="text-[8px] font-mono text-tertiary uppercase">DIFF {player.pointDiff}</div>
+                      <div className="text-[8px] font-mono text-white/40 uppercase">DIFF {player.pointDiff}</div>
                     </div>
                   </motion.button>
                 );

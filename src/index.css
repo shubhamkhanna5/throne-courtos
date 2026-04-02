@@ -6,20 +6,21 @@
   --font-display: "Playfair Display", serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-primary: #000000;
-  --color-primary-dim: #333333;
-  --color-on-primary: #ffffff;
+  --color-primary: #84cc16; /* Lime 500 */
+  --color-primary-dim: #65a30d; /* Lime 600 */
+  --color-on-primary: #000000;
   --color-surface: #ffffff;
-  --color-on-surface: #000000;
-  --color-surface-container: #f5f5f5;
-  --color-surface-container-low: #fafafa;
+  --color-on-surface: #0f172a; /* Slate 900 */
+  --color-surface-container: #f8fafc; /* Slate 50 */
+  --color-surface-container-low: #f1f5f9; /* Slate 100 */
   --color-surface-container-lowest: #ffffff;
-  --color-outline: #e0e0e0;
-  --color-outline-variant: #eeeeee;
-  --color-secondary: #666666;
-  --color-tertiary: #000000;
+  --color-outline: #e2e8f0; /* Slate 200 */
+  --color-outline-variant: #cbd5e1; /* Slate 300 */
+  --color-secondary: #3b82f6; /* Blue 500 */
+  --color-tertiary: #f97316; /* Orange 500 */
   --color-on-tertiary: #ffffff;
-  --color-tertiary-dim: #333333;
+  --color-tertiary-dim: #ea580c; /* Orange 600 */
+  --color-on-tertiary-fixed-variant: #1e293b; /* Slate 800 */
 }
 
 @layer base {

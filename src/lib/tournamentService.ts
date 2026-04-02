@@ -88,10 +88,13 @@ export const tournamentService = {
       let pod = round.pods.find((p: any) => p.id === m.pod_id);
       
       if (!pod) {
+        const podIndex = m.pod_name ? m.pod_name.charCodeAt(0) - 65 : 0;
+        const courtNum = Math.floor(podIndex / 2) + 1;
+        
         pod = {
           id: m.pod_id,
           podName: m.pod_name || '?',
-          courtName: m.pod_name ? `Court ${m.pod_name}` : 'Unknown Court',
+          courtName: `Court ${courtNum}`,
           playerIds: m.player_ids || [],
           matches: [],
           status: 'PENDING'
@@ -188,58 +191,69 @@ export const tournamentService = {
     if (!res.ok) throw new Error(data.error || 'Seeding failed');
   },
 
-  async submitScore(podId: string, matches: any[]) {
-    for (const match of matches) {
-      const { error } = await supabase
-        .from('matches')
-        .update({
-          score1: match.score1,
-          score2: match.score2,
-          status: 'LOCKED'
-        })
-        .eq('id', match.id);
-      if (error) throw error;
-    }
-    // Note: Ranking logic could be added here or via Supabase RPC
+  async advanceRound(tournamentId: string) {
+    const res = await fetch('/api/admin/advance-round', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tournamentId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Round advancement failed');
+    return data;
+  },
+
+  async submitScore(podId: string, matches: any[], tournamentId: string) {
+    const res = await fetch('/api/admin/submit-score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ podId, matches, tournamentId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to submit scores');
+    return data;
   },
 
   async submitPlayoffScore(matchId: string, score1: number, score2: number) {
-    const { data: match, error: mError } = await supabase
-      .from('playoff_matches')
-      .update({ score1, score2, status: 'LOCKED' })
-      .eq('id', matchId)
-      .select()
-      .single();
-    if (mError) throw mError;
-
-    if (match.stage === 'FINALS') {
-      await supabase.from('tournaments').update({ status: 'FINISHED' }).eq('id', match.tournament_id);
-    }
+    const res = await fetch('/api/admin/submit-playoff-score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matchId, score1, score2 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to submit playoff score');
+    return data;
   },
 
   async draftPartner(tournamentId: string, captainId: string, partnerId: string) {
-    const { data: captain } = await supabase.from('players').select('name').eq('id', captainId).single();
-    const { data: partner } = await supabase.from('players').select('name').eq('id', partnerId).single();
-    
-    const { error } = await supabase.from('playoff_teams').insert([{
-      tournament_id: tournamentId,
-      captain_id: captainId,
-      partner_id: partnerId,
-      name: `${captain?.name} / ${partner?.name}`
-    }]);
-    if (error) throw error;
+    const res = await fetch('/api/admin/draft-partner', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tournamentId, captainId, partnerId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Drafting failed');
+    return data;
   },
 
   async resetTournament(id: string) {
-    await supabase.from('matches').delete().eq('tournament_id', id);
-    await supabase.from('playoff_matches').delete().eq('tournament_id', id);
-    await supabase.from('playoff_teams').delete().eq('tournament_id', id);
-    await supabase.from('tournaments').update({ status: 'SETUP', current_round_index: 0 }).eq('id', id);
-    await supabase.from('players').update({ points: 0, point_diff: 0, points_scored: 0, pod_wins: 0, rank: 0 }).eq('tournament_id', id);
+    const res = await fetch('/api/admin/reset-tournament', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Reset failed');
+    return data;
   },
 
   async deleteTournament(id: string) {
-    const { error } = await supabase.from('tournaments').delete().eq('id', id);
-    if (error) throw error;
+    const res = await fetch('/api/admin/delete-tournament', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Delete failed');
+    return data;
   }
 };

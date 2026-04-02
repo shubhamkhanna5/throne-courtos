@@ -5,6 +5,7 @@ import { ArrowRight, Search, Settings, Edit3, User, ShieldCheck } from 'lucide-r
 interface HomeProps {
   onPlayerLogin: () => void;
   onAdminLogin: () => void;
+  onScoreEntry: () => void;
   onSearchPlayers: () => void;
   playerCount?: number;
   courtCount?: number;
@@ -13,6 +14,7 @@ interface HomeProps {
 export default function Home({ 
   onPlayerLogin, 
   onAdminLogin, 
+  onScoreEntry,
   onSearchPlayers,
   playerCount = 1402, 
   courtCount = 84 
@@ -157,7 +159,7 @@ export default function Home({
               </button>
               
               <button 
-                onClick={onAdminLogin}
+                onClick={onScoreEntry}
                 className="home-button-outline"
               >
                 <span className="home-label">SCORE ENTRY</span>
