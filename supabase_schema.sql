@@ -49,10 +49,14 @@ CREATE TABLE IF NOT EXISTS rounds (
 CREATE TABLE IF NOT EXISTS pods (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   round_id UUID REFERENCES rounds(id) ON DELETE CASCADE,
+  tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE,
   court_name TEXT NOT NULL,
   pod_name TEXT NOT NULL, -- A, B
   status TEXT NOT NULL DEFAULT 'PENDING' -- PENDING, LOCKED
 );
+
+-- Migration for pods
+ALTER TABLE pods ADD COLUMN IF NOT EXISTS tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE;
 
 CREATE TABLE IF NOT EXISTS pod_players (
   pod_id UUID REFERENCES pods(id) ON DELETE CASCADE,
@@ -64,6 +68,7 @@ CREATE TABLE IF NOT EXISTS pod_players (
 CREATE TABLE IF NOT EXISTS matches (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   pod_id UUID REFERENCES pods(id) ON DELETE CASCADE,
+  tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE,
   p1_id UUID REFERENCES players(id),
   p2_id UUID REFERENCES players(id),
   p3_id UUID REFERENCES players(id),
@@ -72,6 +77,9 @@ CREATE TABLE IF NOT EXISTS matches (
   score2 INTEGER DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'PENDING' -- PENDING, LOCKED
 );
+
+-- Migration for matches
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE;
 
 CREATE TABLE IF NOT EXISTS playoff_teams (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -112,8 +120,8 @@ BEGIN
   
   FOR i IN 0..(v_num_courts - 1) LOOP
     -- Pod A
-    INSERT INTO pods (round_id, court_name, pod_name)
-    VALUES (p_round_id, v_court_names[i+1], 'A')
+    INSERT INTO pods (round_id, tournament_id, court_name, pod_name)
+    VALUES (p_round_id, p_tournament_id, v_court_names[i+1], 'A')
     RETURNING id INTO v_pod_id;
     
     v_pod_players := v_player_ids[(i*8 + 1):(i*8 + 4)];
@@ -122,14 +130,14 @@ BEGIN
     SELECT v_pod_id, unnest(v_pod_players);
     
     -- Matches for Pod A (Americano: 1+2 vs 3+4, 1+3 vs 2+4, 1+4 vs 2+3)
-    INSERT INTO matches (pod_id, p1_id, p2_id, p3_id, p4_id) VALUES
-    (v_pod_id, v_pod_players[1], v_pod_players[2], v_pod_players[3], v_pod_players[4]),
-    (v_pod_id, v_pod_players[1], v_pod_players[3], v_pod_players[2], v_pod_players[4]),
-    (v_pod_id, v_pod_players[1], v_pod_players[4], v_pod_players[2], v_pod_players[3]);
+    INSERT INTO matches (pod_id, tournament_id, p1_id, p2_id, p3_id, p4_id) VALUES
+    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[2], v_pod_players[3], v_pod_players[4]),
+    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[3], v_pod_players[2], v_pod_players[4]),
+    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[4], v_pod_players[2], v_pod_players[3]);
 
     -- Pod B
-    INSERT INTO pods (round_id, court_name, pod_name)
-    VALUES (p_round_id, v_court_names[i+1], 'B')
+    INSERT INTO pods (round_id, tournament_id, court_name, pod_name)
+    VALUES (p_round_id, p_tournament_id, v_court_names[i+1], 'B')
     RETURNING id INTO v_pod_id;
     
     v_pod_players := v_player_ids[(i*8 + 5):(i*8 + 8)];
@@ -138,10 +146,10 @@ BEGIN
     SELECT v_pod_id, unnest(v_pod_players);
     
     -- Matches for Pod B
-    INSERT INTO matches (pod_id, p1_id, p2_id, p3_id, p4_id) VALUES
-    (v_pod_id, v_pod_players[1], v_pod_players[2], v_pod_players[3], v_pod_players[4]),
-    (v_pod_id, v_pod_players[1], v_pod_players[3], v_pod_players[2], v_pod_players[4]),
-    (v_pod_id, v_pod_players[1], v_pod_players[4], v_pod_players[2], v_pod_players[3]);
+    INSERT INTO matches (pod_id, tournament_id, p1_id, p2_id, p3_id, p4_id) VALUES
+    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[2], v_pod_players[3], v_pod_players[4]),
+    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[3], v_pod_players[2], v_pod_players[4]),
+    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[4], v_pod_players[2], v_pod_players[3]);
   END LOOP;
 END;
 $$ LANGUAGE plpgsql;
@@ -482,7 +490,16 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 12. ROW LEVEL SECURITY (RLS)
+-- 12. RPC: FINISH TOURNAMENT
+DROP FUNCTION IF EXISTS finish_tournament(UUID);
+CREATE OR REPLACE FUNCTION finish_tournament(p_tournament_id UUID)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE tournaments SET status = 'FINISHED' WHERE id = p_tournament_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 13. ROW LEVEL SECURITY (RLS)
 ALTER TABLE tournaments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rounds ENABLE ROW LEVEL SECURITY;
@@ -495,6 +512,15 @@ ALTER TABLE playoff_matches ENABLE ROW LEVEL SECURITY;
 -- 13. REALTIME (Enable for all tables)
 -- This allows the Hype Board and Operator Desk to update instantly
 BEGIN;
+  -- Set replica identity to FULL for tables we filter by tournament_id
+  ALTER TABLE tournaments REPLICA IDENTITY FULL;
+  ALTER TABLE players REPLICA IDENTITY FULL;
+  ALTER TABLE rounds REPLICA IDENTITY FULL;
+  ALTER TABLE pods REPLICA IDENTITY FULL;
+  ALTER TABLE matches REPLICA IDENTITY FULL;
+  ALTER TABLE playoff_teams REPLICA IDENTITY FULL;
+  ALTER TABLE playoff_matches REPLICA IDENTITY FULL;
+
   DROP PUBLICATION IF EXISTS supabase_realtime;
   CREATE PUBLICATION supabase_realtime FOR TABLE 
     tournaments, 
@@ -508,13 +534,28 @@ BEGIN;
 COMMIT;
 
 -- Basic Policies (Allow all for now, to be tightened later)
+DROP POLICY IF EXISTS "Allow public all access" ON tournaments;
 CREATE POLICY "Allow public all access" ON tournaments FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public all access" ON players;
 CREATE POLICY "Allow public all access" ON players FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public all access" ON rounds;
 CREATE POLICY "Allow public all access" ON rounds FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public all access" ON pods;
 CREATE POLICY "Allow public all access" ON pods FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public all access" ON pod_players;
 CREATE POLICY "Allow public all access" ON pod_players FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public all access" ON matches;
 CREATE POLICY "Allow public all access" ON matches FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public all access" ON playoff_teams;
 CREATE POLICY "Allow public all access" ON playoff_teams FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public all access" ON playoff_matches;
 CREATE POLICY "Allow public all access" ON playoff_matches FOR ALL USING (true) WITH CHECK (true);
 
 -- Allow all for service role (implicit, but good to keep in mind)

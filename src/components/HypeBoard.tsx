@@ -85,14 +85,18 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
         >
           {tournament.name}
         </motion.h1>
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-on-surface-variant">
-          <span className="flex items-center gap-2 text-on-tertiary-fixed-variant animate-pulse">
-            <Radio className="w-3 h-3" /> LIVE SYNC
-          </span>
-          <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-primary" /> {tournament.mode} MODE</span>
-          <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-primary" /> ROUND {tournament.currentRoundIndex + 1} / 4</span>
-          <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-on-tertiary-fixed-variant" /> {tournament.status}</span>
-        </div>
+                  <div className="flex flex-wrap items-center justify-center gap-x-4 sm:gap-x-6 gap-y-2 text-[8px] sm:text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-on-surface-variant">
+                    <span className="flex items-center gap-2 text-on-tertiary-fixed-variant">
+                      <div className="relative flex h-2 w-2">
+                        <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></div>
+                        <div className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></div>
+                      </div>
+                      LIVE SYNC ACTIVE
+                    </span>
+                    <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-primary" /> {tournament.mode} MODE</span>
+                    <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-primary" /> ROUND {tournament.currentRoundIndex + 1} / 4</span>
+                    <span className="flex items-center gap-2"><div className="w-1 h-1 rounded-full bg-on-tertiary-fixed-variant" /> {tournament.status}</span>
+                  </div>
 
         {/* Podium Section */}
         {top3 && (top3.first || top3.second || top3.third) && (
@@ -205,14 +209,14 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                 className="relative"
               >
                 <div 
-                  className={`group flex items-center gap-4 p-4 border-b border-outline-variant transition-all hover:bg-primary hover:text-on-primary bg-surface rounded-lg relative ${
+                  className={`group flex items-center gap-3 sm:gap-4 p-3 sm:p-4 border-b border-outline-variant transition-all hover:bg-primary hover:text-on-primary bg-surface rounded-lg relative ${
                     isQualified ? 'border-l-4 border-l-primary' : 'opacity-80 grayscale-[0.5]'
                   }`}
                 >
                   {/* Rank & Delta */}
-                  <div className="w-14 flex flex-col items-center shrink-0">
-                    <span className="text-3xl editorial-title font-black">{rank}</span>
-                    <div className="flex items-center gap-0.5 text-[8px] font-bold">
+                  <div className="w-10 sm:w-14 flex flex-col items-center shrink-0">
+                    <span className="text-xl sm:text-3xl editorial-title font-black">{rank}</span>
+                    <div className="flex items-center gap-0.5 text-[7px] sm:text-[8px] font-bold">
                       {delta > 0 ? (
                         <span className="text-on-tertiary-fixed-variant flex items-center bg-tertiary-container/20 px-1 rounded">▲ +{delta}</span>
                       ) : delta < 0 ? (
@@ -224,32 +228,32 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                   </div>
 
                   {/* Player Info */}
-                  <div className="flex-1 min-w-0 flex items-center gap-4">
+                  <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-4">
                     {player.avatarUrl ? (
                       <img 
                         src={getOptimizedAvatar(player.avatarUrl) || ''} 
                         alt={player.name} 
-                        className="w-12 h-12 rounded-xl object-cover border-2 border-outline-variant group-hover:border-on-primary/30 shadow-md" 
+                        className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl object-cover border-2 border-outline-variant group-hover:border-on-primary/30 shadow-md" 
                         referrerPolicy="no-referrer" 
                       />
                     ) : (
-                      <div className="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center border-2 border-outline-variant group-hover:border-on-primary/30 group-hover:bg-on-primary/10">
-                        <Trophy className="w-6 h-6 text-on-surface-variant opacity-20 group-hover:text-on-primary/40" />
+                      <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-surface-container-high flex items-center justify-center border-2 border-outline-variant group-hover:border-on-primary/30 group-hover:bg-on-primary/10">
+                        <Trophy className="w-4 h-4 sm:w-6 sm:h-6 text-on-surface-variant opacity-20 group-hover:text-on-primary/40" />
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg font-black truncate uppercase tracking-tight text-on-surface group-hover:text-on-primary">{player.name}</span>
-                        <span className="text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/60">#{player.jerseyNumber}</span>
-                        {rank === 1 && <Trophy className="w-4 h-4 text-tertiary" />}
+                      <div className="flex items-center gap-1 sm:gap-2">
+                        <span className="text-sm sm:text-lg font-black truncate uppercase tracking-tight text-on-surface group-hover:text-on-primary">{player.name}</span>
+                        <span className="text-[8px] sm:text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/60">#{player.jerseyNumber}</span>
+                        {rank === 1 && <Trophy className="w-3 h-3 sm:w-4 sm:h-4 text-tertiary" />}
                       </div>
-                      <div className="flex items-center gap-2">
-                        <div className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest ${
+                      <div className="flex items-center gap-1 sm:gap-2">
+                        <div className={`text-[7px] sm:text-[8px] font-black px-1 sm:px-1.5 py-0.5 rounded uppercase tracking-widest ${
                           isQualified ? 'bg-primary/10 text-primary group-hover:bg-on-primary/20 group-hover:text-on-primary' : 'bg-surface-container-high text-on-surface-variant'
                         }`}>
                           {isQualified ? 'Qualified' : 'Eliminated'}
                         </div>
-                        <div className="text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase tracking-widest">
+                        <div className="hidden sm:block text-[10px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase tracking-widest">
                           Court {Math.ceil(rank / 8)} — Pod {Math.ceil(rank / 4) % 2 === 1 ? 'A' : 'B'}
                         </div>
                       </div>
@@ -257,20 +261,20 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                   </div>
 
                   {/* Stats */}
-                  <div className="flex gap-6 text-right shrink-0">
+                  <div className="flex gap-3 sm:gap-6 text-right shrink-0">
                     <div className="flex flex-col">
-                      <span className="text-sm font-black text-on-surface group-hover:text-on-primary">{player.points}</span>
-                      <span className="text-[8px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase">PTS</span>
+                      <span className="text-xs sm:text-sm font-black text-on-surface group-hover:text-on-primary">{player.points}</span>
+                      <span className="text-[7px] sm:text-[8px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase">PTS</span>
                     </div>
-                    <div className="flex flex-col w-10">
-                      <span className={`text-sm font-black ${player.pointDiff > 0 ? 'text-on-tertiary-fixed-variant group-hover:text-on-primary' : player.pointDiff < 0 ? 'text-secondary group-hover:text-on-primary' : 'text-on-surface group-hover:text-on-primary'}`}>
+                    <div className="flex flex-col w-8 sm:w-10">
+                      <span className={`text-xs sm:text-sm font-black ${player.pointDiff > 0 ? 'text-on-tertiary-fixed-variant group-hover:text-on-primary' : player.pointDiff < 0 ? 'text-secondary group-hover:text-on-primary' : 'text-on-surface group-hover:text-on-primary'}`}>
                         {player.pointDiff > 0 ? '+' : ''}{player.pointDiff}
                       </span>
-                      <span className="text-[8px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase">DIFF</span>
+                      <span className="text-[7px] sm:text-[8px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase">DIFF</span>
                     </div>
-                    <div className="flex flex-col w-10">
-                      <span className="text-sm font-black text-on-surface group-hover:text-on-primary">{player.pointsScored}</span>
-                      <span className="text-[8px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase">SCR</span>
+                    <div className="hidden xs:flex flex-col w-8 sm:w-10">
+                      <span className="text-xs sm:text-sm font-black text-on-surface group-hover:text-on-primary">{player.pointsScored}</span>
+                      <span className="text-[7px] sm:text-[8px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase">SCR</span>
                     </div>
                   </div>
                 </div>

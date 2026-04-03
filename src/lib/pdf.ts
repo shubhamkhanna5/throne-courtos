@@ -180,3 +180,92 @@ export function generatePDF(tournament: Tournament) {
 
   doc.save(`${tournament.name.replace(/\s+/g, '_')}_Report.pdf`);
 }
+
+export function generateScorecardsPDF(tournament: Tournament) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  // Create a page for each pod in each round
+  (tournament.rounds || []).forEach((round) => {
+    (round.pods || []).forEach((pod) => {
+      doc.addPage();
+      
+      // Header
+      doc.setFillColor(20, 20, 20);
+      doc.rect(0, 0, pageWidth, 40, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text('OFFICIAL SCORECARD', pageWidth / 2, 15, { align: 'center' });
+      
+      doc.setFontSize(10);
+      doc.text(`${tournament.name.toUpperCase()} // ${round.type} ROUND ${round.number}`, pageWidth / 2, 25, { align: 'center' });
+      doc.text(`${pod.courtName.toUpperCase()} — POD ${pod.podName}`, pageWidth / 2, 32, { align: 'center' });
+      
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(12);
+      
+      // Player List
+      doc.text('PLAYERS IN THIS POD:', 14, 55);
+      const podPlayers = (pod.playerIds || []).map(id => tournament.players.find(p => p.id === id));
+      
+      podPlayers.forEach((p, i) => {
+        doc.setFont('helvetica', 'bold');
+        doc.text(`${i + 1}. ${p?.name || 'Unknown'}`, 20, 65 + (i * 8));
+        doc.setFont('helvetica', 'normal');
+        doc.text(`(#${p?.jerseyNumber || '??'})`, 80, 65 + (i * 8));
+      });
+
+      // Match Grid
+      let currentY = 110;
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('MATCHES & RESULTS', 14, currentY);
+      currentY += 10;
+
+      (pod.matches || []).forEach((m, mIdx) => {
+        const p1 = tournament.players.find(p => p.id === m.playerIds[0])?.name || 'P1';
+        const p2 = tournament.players.find(p => p.id === m.playerIds[1])?.name || 'P2';
+        const p3 = tournament.players.find(p => p.id === m.playerIds[2])?.name || 'P3';
+        const p4 = tournament.players.find(p => p.id === m.playerIds[3])?.name || 'P4';
+
+        // Match Box
+        doc.setDrawColor(200, 200, 200);
+        doc.rect(14, currentY, pageWidth - 28, 35);
+        
+        doc.setFontSize(10);
+        doc.text(`MATCH ${mIdx + 1}`, 18, currentY + 8);
+        
+        // Team 1
+        doc.setFontSize(11);
+        doc.text(`${p1} & ${p2}`, 20, currentY + 18);
+        doc.rect(pageWidth - 60, currentY + 12, 20, 10); // Score box 1
+        
+        doc.text('VS', pageWidth / 2 - 5, currentY + 25, { align: 'center' });
+        
+        // Team 2
+        doc.text(`${p3} & ${p4}`, 20, currentY + 30);
+        doc.rect(pageWidth - 60, currentY + 24, 20, 10); // Score box 2
+        
+        currentY += 45;
+        
+        if (currentY > pageHeight - 40 && mIdx < pod.matches.length - 1) {
+          doc.addPage();
+          currentY = 20;
+        }
+      });
+
+      // Footer / Verification
+      doc.setFontSize(8);
+      doc.text('OPERATOR SIGNATURE: ___________________________', 14, pageHeight - 20);
+      doc.text('DATE: ________________', pageWidth - 60, pageHeight - 20);
+    });
+  });
+
+  // Remove the first empty page if any (jsPDF starts with one)
+  doc.deletePage(1);
+  
+  doc.save(`${tournament.name.replace(/\s+/g, '_')}_Scorecards.pdf`);
+}

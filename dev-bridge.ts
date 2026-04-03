@@ -559,6 +559,20 @@ async function startServer() {
     }
   });
 
+  app.post('/api/admin/finish-tournament', async (req, res) => {
+    try {
+      const { id } = req.body;
+      const { error } = await supabaseAdmin
+        .from('tournaments')
+        .update({ status: 'FINISHED' })
+        .eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post('/api/admin/delete-tournament', async (req, res) => {
     try {
       const { id } = req.body;

@@ -7,9 +7,10 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface SetupProps {
   tournament: Tournament | null;
+  onRefresh?: () => void;
 }
 
-export default function Setup({ tournament }: SetupProps) {
+export default function Setup({ tournament, onRefresh }: SetupProps) {
   const [name, setName] = useState(tournament?.name || 'Spring Pickleball Ladder');
   const [mode, setMode] = useState<TournamentMode>(tournament?.mode || 'MINI');
   const [players, setPlayers] = useState<Partial<Player>[]>(tournament?.players || []);
@@ -44,9 +45,7 @@ export default function Setup({ tournament }: SetupProps) {
   const handleLoadTournament = (id: string) => {
     console.log('[Setup] Switching to tournament:', id);
     localStorage.setItem('courtos_current_tournament_id', id);
-    setTimeout(() => {
-      window.location.href = window.location.href;
-    }, 5000);
+    onRefresh?.();
   };
 
   const handleDeleteTournament = async (e: React.MouseEvent, id: string) => {
@@ -55,9 +54,7 @@ export default function Setup({ tournament }: SetupProps) {
     
     try {
       await tournamentService.deleteTournament(id);
-      setTimeout(() => {
-        window.location.href = window.location.href;
-      }, 5000);
+      onRefresh?.();
     } catch (err) {
       console.error('Failed to delete tournament:', err);
     }
@@ -144,9 +141,7 @@ export default function Setup({ tournament }: SetupProps) {
       localStorage.setItem('courtos_current_tournament_id', tId);
       
       await tournamentService.startSeeding(tId);
-      setTimeout(() => {
-        window.location.href = window.location.href;
-      }, 5000);
+      onRefresh?.();
     } catch (error: any) {
       console.error('Setup error:', error);
       alert(`An error occurred during setup: ${error.message}`);
@@ -155,34 +150,41 @@ export default function Setup({ tournament }: SetupProps) {
     }
   };
 
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+
   const handleReset = async () => {
     if (!tournament) return;
-    if (confirm('Are you sure you want to reset the current tournament? This will delete all matches and pods for the current event.')) {
-      try {
-        await tournamentService.resetTournament(tournament.id);
-        setTimeout(() => {
-          window.location.href = window.location.href;
-        }, 5000);
-      } catch (err: any) {
-        alert(`Failed to reset: ${err.message}`);
-      }
+    if (!showResetConfirm) {
+      setShowResetConfirm(true);
+      return;
+    }
+
+    try {
+      await tournamentService.resetTournament(tournament.id);
+      setShowResetConfirm(false);
+      onRefresh?.();
+    } catch (err: any) {
+      console.error('Reset error:', err);
     }
   };
 
   const handleWipeAll = async () => {
-    if (confirm('Are you sure you want to wipe ALL data? This will delete all tournaments.')) {
-      try {
-        const tournaments = await tournamentService.getTournaments();
-        for (const t of tournaments) {
-          await tournamentService.deleteTournament(t.id);
-        }
-        localStorage.removeItem('courtos_current_tournament_id');
-        setTimeout(() => {
-          window.location.href = window.location.href;
-        }, 5000);
-      } catch (err: any) {
-        alert(`Failed to wipe: ${err.message}`);
+    if (!showWipeConfirm) {
+      setShowWipeConfirm(true);
+      return;
+    }
+
+    try {
+      const tournaments = await tournamentService.getTournaments();
+      for (const t of tournaments) {
+        await tournamentService.deleteTournament(t.id);
       }
+      localStorage.removeItem('courtos_current_tournament_id');
+      setShowWipeConfirm(false);
+      onRefresh?.();
+    } catch (err: any) {
+      console.error('Wipe error:', err);
     }
   };
 
@@ -398,7 +400,7 @@ export default function Setup({ tournament }: SetupProps) {
             <div className="mt-16 pt-12 border-t border-outline-variant space-y-4">
               <button 
                 onClick={handleSetup}
-                disabled={isSettingUp || players.length < requiredCount || (!!tournament && tournament.status !== 'SETUP')}
+                disabled={isSettingUp || players.length < requiredCount || (!!tournament && tournament.status !== 'SETUP' && tournament.status !== 'FINISHED')}
                 className="w-full bg-primary text-on-primary py-6 rounded-xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-4 hover:bg-primary-dim shadow-2xl disabled:opacity-20 transition-all"
               >
                 {isSettingUp ? (
@@ -417,19 +419,31 @@ export default function Setup({ tournament }: SetupProps) {
               <div className="flex flex-col sm:flex-row gap-4">
                 <button 
                   onClick={handleReset}
-                  className="flex-1 py-4 bg-black text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-black/80 transition-colors"
+                  className={`flex-1 py-4 rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 transition-colors ${
+                    showResetConfirm ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-black text-white hover:bg-black/80'
+                  }`}
                 >
                   <RotateCcw className="w-4 h-4" />
-                  RESET CURRENT
+                  {showResetConfirm ? 'CONFIRM RESET?' : 'RESET CURRENT'}
                 </button>
                 <button 
                   onClick={handleWipeAll}
-                  className="flex-1 py-4 bg-red-600 text-white rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-red-700 transition-colors"
+                  className={`flex-1 py-4 rounded-xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 transition-colors ${
+                    showWipeConfirm ? 'bg-red-800 text-white hover:bg-red-900' : 'bg-red-600 text-white hover:bg-red-700'
+                  }`}
                 >
                   <Trash2 className="w-4 h-4" />
-                  WIPE ALL DATA
+                  {showWipeConfirm ? 'CONFIRM WIPE ALL?' : 'WIPE ALL DATA'}
                 </button>
               </div>
+              {(showResetConfirm || showWipeConfirm) && (
+                <button 
+                  onClick={() => { setShowResetConfirm(false); setShowWipeConfirm(false); }}
+                  className="w-full py-2 text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant hover:text-primary transition-colors"
+                >
+                  CANCEL ACTION
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -577,7 +591,7 @@ export default function Setup({ tournament }: SetupProps) {
             </div>
           )}
 
-          {!!tournament && tournament.status !== 'SETUP' && (
+          {!!tournament && tournament.status !== 'SETUP' && tournament.status !== 'FINISHED' && (
             <div className="bg-primary-container/20 border border-primary p-6 rounded-2xl flex gap-4 items-start">
               <AlertTriangle className="w-6 h-6 text-primary shrink-0" />
               <div className="space-y-1">

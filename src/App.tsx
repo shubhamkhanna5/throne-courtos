@@ -69,6 +69,10 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 function AppContent() {
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [isAuth, setIsAuth] = useState(() => {
     return localStorage.getItem('courtos_is_auth') === 'true';
   });
@@ -82,28 +86,73 @@ function AppContent() {
   const navigate = useNavigate();
 
   const fetchState = async (silent = false) => {
+    if (isLoading && silent) return; // Don't overlap silent fetches
+    
     try {
       console.log(`[App] Starting fetchState (silent: ${silent})...`);
       if (!silent) setIsLoading(true);
-      const storedId = localStorage.getItem('courtos_current_tournament_id') || undefined;
-      console.log('[App] Fetching tournament state for ID:', storedId);
-      const data = await tournamentService.getTournament(storedId);
-      if (data) {
-        console.log('[App] Tournament data received:', data.id);
-        setTournament(data as Tournament);
-        if (data.id) {
-          localStorage.setItem('courtos_current_tournament_id', data.id);
+      if (silent) setIsSyncing(true);
+      
+      const storedId = localStorage.getItem('courtos_current_tournament_id');
+      if (!storedId) {
+        // Try to get the latest tournament if none stored
+        const { data: latest } = await supabase
+          .from('tournaments')
+          .select('id')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (latest) {
+          localStorage.setItem('courtos_current_tournament_id', latest.id);
+        } else {
+          setIsLoading(false);
+          setIsSyncing(false);
+          return;
         }
-      } else if (!silent) {
-        console.warn('[App] No tournament data returned, setting state to null');
+      }
+
+      const currentId = localStorage.getItem('courtos_current_tournament_id');
+      console.log('[App] Fetching tournament state for ID:', currentId);
+      
+      if (!supabase) {
+        console.warn('[App] Supabase client not initialized, skipping RPC...');
+        const fallbackData = await tournamentService.getTournament(currentId || undefined);
+        if (fallbackData) {
+          setTournament(fallbackData as Tournament);
+          setLastUpdate(new Date());
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // Use the RPC as requested by the user
+      const { data, error } = await supabase.rpc('get_tournament_state', {
+        p_tournament_id: currentId
+      });
+
+      if (error) {
+        console.error('[App] RPC get_tournament_state failed:', error.message, error.hint, error.details);
+        console.warn('[App] Falling back to Service API...');
+        // Fallback to existing service if RPC fails (likely not created yet)
+        const fallbackData = await tournamentService.getTournament(currentId || undefined);
+        if (fallbackData) {
+          setTournament(fallbackData as Tournament);
+          setLastUpdate(new Date());
+        }
+      } else if (data) {
+        console.log('[App] Tournament data received via RPC:', data.id);
+        setTournament(data as Tournament);
+        setLastUpdate(new Date());
+      } else {
         setTournament(null);
       }
     } catch (err) {
       console.error('[App] fetchState failed:', err);
       if (!silent) setTournament(null);
     } finally {
-      console.log('[App] fetchState completed, setting isLoading to false');
       setIsLoading(false);
+      setIsSyncing(false);
     }
   };
 
@@ -122,52 +171,87 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    // Supabase Realtime (Optimized 🔥)
+    // Supabase Realtime (New Architecture 🚀)
     let channel: any = null;
     if (supabase && tournament?.id) {
-      console.log('[App] Setting up realtime for tournament:', tournament.id);
+      console.log('[App] Subscribing to tournament-realtime:', tournament.id);
+      
       channel = supabase
-        .channel(`tournament_${tournament.id}`)
+        .channel(`tournament-realtime-${tournament.id}`)
+        // MATCH UPDATES
         .on(
-          'postgres_changes', 
-          { 
-            event: '*', 
-            schema: 'public',
-            table: 'matches',
-            filter: `tournament_id=eq.${tournament.id}`
-          }, 
-          () => {
-            console.log('[App] Realtime update: matches');
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'matches', filter: `tournament_id=eq.${tournament.id}` },
+          (payload: any) => {
+            console.log('🎯 match update', payload);
             fetchState(true);
           }
         )
         .on(
           'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'tournaments',
-            filter: `id=eq.${tournament.id}`
-          },
-          () => {
-            console.log('[App] Realtime update: tournament');
+          { event: '*', schema: 'public', table: 'players', filter: `tournament_id=eq.${tournament.id}` },
+          (payload: any) => {
+            console.log('📊 player update', payload);
             fetchState(true);
           }
         )
         .on(
           'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'playoff_teams',
-            filter: `tournament_id=eq.${tournament.id}`
-          },
-          () => {
-            console.log('[App] Realtime update: playoff_teams');
+          { event: '*', schema: 'public', table: 'pods', filter: `tournament_id=eq.${tournament.id}` },
+          (payload: any) => {
+            console.log('📦 pod update', payload);
             fetchState(true);
           }
         )
-        .subscribe();
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'rounds', filter: `tournament_id=eq.${tournament.id}` },
+          (payload: any) => {
+            console.log('🔄 round update', payload);
+            fetchState(true);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'tournaments', filter: `id=eq.${tournament.id}` },
+          (payload: any) => {
+            console.log('🏆 tournament update', payload);
+            fetchState(true);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'playoff_teams', filter: `tournament_id=eq.${tournament.id}` },
+          (payload: any) => {
+            console.log('👥 playoff teams update', payload);
+            fetchState(true);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'playoff_matches', filter: `tournament_id=eq.${tournament.id}` },
+          (payload: any) => {
+            console.log('⚔️ playoff matches update', payload);
+            fetchState(true);
+          }
+        )
+        .subscribe((status: string, err?: any) => {
+          console.log(`[App] Realtime status for ${tournament.id}:`, status, err || '');
+          
+          if (status === 'SUBSCRIBED') {
+            setSyncError(null);
+          }
+
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.error('[App] Realtime connection error:', status, err);
+            setSyncError(status);
+            // Exponential backoff or simple delay
+            setTimeout(() => {
+              setRetryCount(prev => prev + 1);
+              fetchState(true);
+            }, 5000);
+          }
+        });
     }
 
     // Failsafe polling (reduced frequency since we have Realtime)
@@ -179,7 +263,7 @@ function AppContent() {
       }
       clearInterval(interval);
     };
-  }, [tournament?.id]);
+  }, [tournament?.id, retryCount]);
 
   // Removed full-screen loading screen as per user request
   
@@ -239,10 +323,31 @@ function AppContent() {
         <nav className="fixed bottom-0 left-0 right-0 bg-black border-t border-white/10 z-50 md:top-0 md:bottom-auto md:border-b md:border-t-0">
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
             <div className="flex items-center gap-4 md:gap-12 flex-1 text-white">
-              <Link to="/" className="hidden md:flex items-center gap-2 mr-4">
-                <Trophy className="w-6 h-6 text-white" />
-                <span className="font-display italic font-bold text-xl text-white">CourtOS</span>
-              </Link>
+              <div className="flex items-center gap-4">
+                <Link to="/" className="hidden md:flex items-center gap-2">
+                  <Trophy className="w-6 h-6 text-white" />
+                  <span className="font-display italic font-bold text-xl text-white">CourtOS</span>
+                </Link>
+                
+                {/* Live Sync Indicator */}
+                <button 
+                  onClick={() => {
+                    setRetryCount(prev => prev + 1);
+                    fetchState(false);
+                  }}
+                  className={`flex items-center gap-2 px-2 py-0.5 rounded-full border transition-all ${
+                    syncError ? 'bg-red-500/20 border-red-500/50 hover:bg-red-500/30' : 'bg-white/10 border-white/10 hover:bg-white/20'
+                  }`}
+                  title={syncError ? 'Connection Error - Click to Reconnect' : 'Live Sync Active'}
+                >
+                  <div className={`w-1.5 h-1.5 rounded-full ${
+                    syncError ? 'bg-red-500 animate-pulse' : (isSyncing ? 'bg-primary animate-pulse' : 'bg-green-400')
+                  }`} />
+                  <span className={`text-[8px] font-mono font-bold uppercase tracking-widest ${syncError ? 'text-red-400' : 'opacity-60'}`}>
+                    {syncError ? 'Connection Error' : (isSyncing ? 'Syncing...' : (lastUpdate ? `Live — ${lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Live'))}
+                  </span>
+                </button>
+              </div>
               
               <div className="flex items-center gap-2 md:gap-6">
                 {navItems
@@ -326,15 +431,15 @@ function AppContent() {
                 <Route path="/players" element={tournament ? <PlayerPage tournament={tournament} /> : <NoTournament onSetup={() => setShowPinModal({ target: '/admin' })} />} />
                 
                 <Route path="/operator" element={
-                  isAuth ? (tournament ? <OperatorDesk tournament={tournament} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
+                  isAuth ? (tournament ? <OperatorDesk tournament={tournament} onRefresh={() => fetchState(true)} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
                 } />
                 
                 <Route path="/playoffs" element={
-                  isAuth ? (tournament ? <PlayoffDraft tournament={tournament} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
+                  isAuth ? (tournament ? <PlayoffDraft tournament={tournament} onRefresh={() => fetchState(true)} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
                 } />
                 
                 <Route path="/admin" element={
-                  isAuth ? <Setup tournament={tournament} /> : <Navigate to="/" />
+                  isAuth ? <Setup tournament={tournament} onRefresh={() => fetchState(true)} /> : <Navigate to="/" />
                 } />
               </Routes>
             </motion.div>

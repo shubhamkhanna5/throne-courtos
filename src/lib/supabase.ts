@@ -13,6 +13,8 @@ if (isValid(supabaseUrl) && isValid(supabaseAnonKey)) {
   try {
     // Diagnostic log (masked)
     console.log('Initializing Supabase client with URL:', supabaseUrl.substring(0, 10) + '...');
+    console.log('Supabase Anon Key length:', supabaseAnonKey.length);
+    console.log('Supabase Anon Key prefix:', supabaseAnonKey.substring(0, 10) + '...');
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
     console.log('Supabase client initialized successfully');
   } catch (err) {

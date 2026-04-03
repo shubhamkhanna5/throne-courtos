@@ -155,50 +155,50 @@ export default function PlayerPage({ tournament }: PlayerPageProps) {
                 exit={{ opacity: 0, scale: 0.9 }}
                 className="bg-surface rounded-2xl border-2 border-outline overflow-hidden shadow-sm"
               >
-                <div className="p-6 flex justify-between items-start">
+                <div className="p-4 sm:p-6 flex justify-between items-start">
                   <div className="space-y-1">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-tertiary">PLAYER STATUS</div>
-                    <h3 className="text-2xl font-display italic font-bold text-primary">{player.name}</h3>
-                    <div className="flex items-center gap-2 text-xs font-mono font-bold">
+                    <div className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-tertiary">PLAYER STATUS</div>
+                    <h3 className="text-xl sm:text-2xl font-display italic font-bold text-primary leading-tight">{player.name}</h3>
+                    <div className="flex items-center gap-2 text-[10px] sm:text-xs font-mono font-bold">
                       <span className="bg-primary text-surface px-2 py-0.5 rounded">#{player.jerseyNumber}</span>
                       <span className="text-secondary uppercase">DUPR {player.duprId}</span>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-tertiary">RANK</div>
-                    <div className="text-3xl font-display italic font-black text-primary">#{rank}</div>
+                    <div className="text-[8px] sm:text-[10px] font-bold uppercase tracking-widest text-tertiary">RANK</div>
+                    <div className="text-2xl sm:text-3xl font-display italic font-black text-primary">#{rank}</div>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 border-t border-outline">
-                  <div className="p-4 border-r border-outline text-center">
-                    <div className="text-[8px] font-bold uppercase tracking-widest text-tertiary mb-1">POINTS</div>
-                    <div className="text-xl font-bold text-primary">{player.points}</div>
+                  <div className="p-3 sm:p-4 border-r border-outline text-center">
+                    <div className="text-[7px] sm:text-[8px] font-bold uppercase tracking-widest text-tertiary mb-1">POINTS</div>
+                    <div className="text-lg sm:text-xl font-bold text-primary">{player.points}</div>
                   </div>
-                  <div className="p-4 border-r border-outline text-center">
-                    <div className="text-[8px] font-bold uppercase tracking-widest text-tertiary mb-1">DIFF</div>
-                    <div className="text-xl font-bold text-green-600">+{player.pointDiff}</div>
+                  <div className="p-3 sm:p-4 border-r border-outline text-center">
+                    <div className="text-[7px] sm:text-[8px] font-bold uppercase tracking-widest text-tertiary mb-1">DIFF</div>
+                    <div className="text-lg sm:text-xl font-bold text-green-600">+{player.pointDiff}</div>
                   </div>
-                  <div className="p-4 text-center">
-                    <div className="text-[8px] font-bold uppercase tracking-widest text-tertiary mb-1">WINS</div>
-                    <div className="text-xl font-bold text-primary">{player.podWins}</div>
+                  <div className="p-3 sm:p-4 text-center">
+                    <div className="text-[7px] sm:text-[8px] font-bold uppercase tracking-widest text-tertiary mb-1">WINS</div>
+                    <div className="text-lg sm:text-xl font-bold text-primary">{player.podWins}</div>
                   </div>
                 </div>
 
-                <div className="bg-surface-variant p-6 border-t border-outline">
+                <div className="bg-surface-variant p-4 sm:p-6 border-t border-outline">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-3 h-3 rounded-full animate-pulse ${
+                    <div className="flex items-center gap-3 sm:gap-4">
+                      <div className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full animate-pulse ${
                         status === 'PLAYING' || status === 'PLAYOFFS' ? 'bg-green-500' : 
                         status === 'ON DECK' || status === 'QUALIFIED' ? 'bg-yellow-500' : 
                         status === 'ELIMINATED' ? 'bg-red-500' : 'bg-tertiary'
                       }`} />
-                      <span className="text-sm font-bold uppercase tracking-widest text-primary">{status}</span>
+                      <span className="text-xs sm:text-sm font-bold uppercase tracking-widest text-primary">{status}</span>
                     </div>
                     {pod && (
-                      <div className="flex items-center gap-2 text-xs font-bold uppercase text-secondary">
-                        <MapPin className="w-3 h-3" />
-                        {pod.courtName} — POD {pod.podName}
+                      <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-bold uppercase text-secondary">
+                        <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                        <span className="truncate max-w-[120px] sm:max-w-none">{pod.courtName} — POD {pod.podName}</span>
                       </div>
                     )}
                   </div>

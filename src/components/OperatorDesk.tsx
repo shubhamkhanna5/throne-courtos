@@ -1,16 +1,18 @@
+import { generateScorecardsPDF } from '../lib/pdf';
 import { useState, useEffect, useRef } from 'react';
 import { Tournament, Pod, Match, Round, Player } from '../types';
 import { tournamentService } from '../lib/tournamentService';
-import { Check, Lock, Unlock, ChevronLeft, ChevronRight, Save, Trophy, Loader2, Send, Download, Clock } from 'lucide-react';
+import { Check, Lock, Unlock, ChevronLeft, ChevronRight, Save, Trophy, Loader2, Send, Download, Clock, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 interface OperatorDeskProps {
   tournament: Tournament;
+  onRefresh?: () => void;
 }
 
-export default function OperatorDesk({ tournament }: OperatorDeskProps) {
+export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProps) {
   const isPlayoffs = tournament.status === 'PLAYOFFS';
   const currentRound = (!isPlayoffs && Array.isArray(tournament.rounds) && tournament.rounds.length > tournament.currentRoundIndex) 
     ? tournament.rounds[tournament.currentRoundIndex] 
@@ -210,14 +212,21 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
       status: 'LOCKED' as const
     }));
 
+    // Optimistic UI: Transition back immediately
+    const previousScores = { ...scores };
+    setScores({});
+    setView('PODS');
+
     try {
       await tournamentService.submitScore(selectedPod.id, matches, tournament.id);
-      setScores({});
-      setView('PODS');
-      // Removed hard refresh after score submission as it was causing UI reset issues.
-      // Realtime listeners in App.tsx will handle the data update.
+      // Success! Realtime will handle the rest.
+      onRefresh?.();
     } catch (err) {
       console.error('Submit score error:', err);
+      // Revert on error
+      setScores(previousScores);
+      setSelectedPodId(selectedPod.id);
+      setView('SCORES');
       alert('Failed to submit scores. Please try again.');
     } finally {
       setIsLoading(false);
@@ -241,37 +250,48 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
     }
 
     setIsLoading(true);
+    const previousScores = { ...scores };
+    const matchId = selectedPlayoffMatch.id;
+    
+    // Optimistic UI: Transition back immediately
+    setScores({});
+    setSelectedPlayoffMatchId(null);
+    setView('PODS');
+
     try {
-      await tournamentService.submitPlayoffScore(selectedPlayoffMatch.id, s1, s2);
-      setScores({});
-      setSelectedPlayoffMatchId(null);
-      setView('PODS');
-      // Removed hard refresh after score submission.
+      await tournamentService.submitPlayoffScore(matchId, s1, s2);
+      // Success!
+      onRefresh?.();
     } catch (err) {
       console.error('Submit playoff score error:', err);
+      // Revert on error
+      setScores(previousScores);
+      setSelectedPlayoffMatchId(matchId);
+      setView('SCORES');
       alert('Failed to submit playoff score. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
+  const [showAdvanceConfirm, setShowAdvanceConfirm] = useState(false);
+
   const handleAdvanceRound = async () => {
     if (!tournament || isAdvancing) return;
     
     const allPodsLocked = !currentRound || currentRound.pods?.every(p => p.status === 'LOCKED');
-    if (!allPodsLocked) {
-      if (!confirm('Not all pods are locked. Are you sure you want to complete this phase?')) return;
+    if (!allPodsLocked && !showAdvanceConfirm) {
+      setShowAdvanceConfirm(true);
+      return;
     }
 
     setIsAdvancing(true);
     try {
       await tournamentService.advanceRound(tournament.id);
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      setShowAdvanceConfirm(false);
+      onRefresh?.();
     } catch (err) {
       console.error('Advance round error:', err);
-      alert(err instanceof Error ? err.message : 'Failed to advance round. Please try again.');
     } finally {
       setIsAdvancing(false);
     }
@@ -329,6 +349,11 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
     });
 
     doc.save(`${tournamentName.replace(/\s+/g, '_')}_${roundTitle.replace(/\s+/g, '_')}_Assignments.pdf`);
+  };
+
+  const downloadScorecards = () => {
+    if (!tournament) return;
+    generateScorecardsPDF(tournament);
   };
 
   const downloadResults = () => {
@@ -460,6 +485,68 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
     doc.save(`${tournamentName.replace(/\s+/g, '_')}_Results.pdf`);
   };
 
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+
+  const handleFinishTournament = async () => {
+    if (!tournament || isLoading) return;
+    
+    setIsLoading(true);
+    try {
+      console.log('[OperatorDesk] Finishing tournament:', tournament.id);
+      await tournamentService.finishTournament(tournament.id);
+      setShowFinishConfirm(false);
+      onRefresh?.();
+      // Realtime will update the status
+    } catch (err) {
+      console.error('Finish tournament error:', err);
+      // Fallback to simpler error handling if alert is blocked
+      setIsLoading(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStartNewTournament = () => {
+    localStorage.removeItem('courtos_current_tournament_id');
+    window.location.href = '/admin';
+  };
+
+  if ((tournament.status as any) === 'FINISHED') {
+    return (
+      <div className="flex flex-col items-center justify-center p-24 text-center space-y-6">
+        <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center">
+          <Trophy className="w-12 h-12 text-green-600" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-serif italic font-bold">Tournament Complete</h2>
+          <p className="text-gray-500 max-w-xs mx-auto">The event has been finalized. You can download the results or start a new tournament.</p>
+        </div>
+        <div className="flex gap-4">
+          <button 
+            onClick={downloadResults}
+            className="px-8 py-3 bg-surface border border-outline rounded-xl font-bold hover:bg-surface-container transition-all flex items-center gap-2"
+          >
+            <Download className="w-5 h-5" />
+            Results PDF
+          </button>
+          <button 
+            onClick={downloadScorecards}
+            className="px-8 py-3 bg-surface border border-outline rounded-xl font-bold hover:bg-surface-container transition-all flex items-center gap-2"
+          >
+            <Download className="w-5 h-5" />
+            Scorecards PDF
+          </button>
+          <button 
+            onClick={handleStartNewTournament}
+            className="px-8 py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary-dim transition-all shadow-lg"
+          >
+            Start New Tournament
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!isPlayoffs && !currentRound) {
     return (
       <div className="flex flex-col items-center justify-center p-24 text-center space-y-6">
@@ -498,20 +585,73 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
         </div>
         
         <div className="flex gap-2">
-          {((!isPlayoffs && currentRound) || (isPlayoffs && (tournament.playoffMatches || []).length === 0)) && (
+          {(tournament.status as any) === 'FINISHED' ? (
             <button
-              onClick={handleAdvanceRound}
-              disabled={isAdvancing}
-              className={`px-6 py-2 rounded-full font-black uppercase tracking-widest text-xs transition-all shadow-lg flex items-center gap-2 ${
-                isAdvancing ? 'bg-outline-variant cursor-not-allowed' : 'bg-primary text-on-primary hover:bg-primary-dim'
-              }`}
+              onClick={handleStartNewTournament}
+              className="px-6 py-2 rounded-full font-black uppercase tracking-widest text-xs transition-all shadow-lg flex items-center gap-2 bg-green-600 text-white hover:bg-green-700"
             >
-              {isAdvancing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              {tournament.status === 'SEEDING' ? 'Complete Seeding' : 
-               tournament.status === 'PLAYOFFS' ? 'Start Playoff Matches' :
-               tournament.currentRoundIndex === 3 ? 'Choose Team Mates' : 
-               `Complete Ladder ${tournament.currentRoundIndex}`}
+              <RotateCcw className="w-4 h-4" />
+              Start New Tournament
             </button>
+          ) : showFinishConfirm ? (
+            <div className="flex gap-2 items-center">
+              <span className="text-[10px] font-black uppercase tracking-widest text-red-600">End Event?</span>
+              <button
+                onClick={handleFinishTournament}
+                disabled={isLoading}
+                className="px-4 py-2 rounded-full font-black uppercase tracking-widest text-[10px] transition-all shadow-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Yes, End'}
+              </button>
+              <button
+                onClick={() => setShowFinishConfirm(false)}
+                disabled={isLoading}
+                className="px-4 py-2 rounded-full font-black uppercase tracking-widest text-[10px] transition-all shadow-lg bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowFinishConfirm(true)}
+              disabled={isLoading}
+              className="px-6 py-2 rounded-full font-black uppercase tracking-widest text-xs transition-all shadow-lg flex items-center gap-2 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              <Check className="w-4 h-4" />
+              End Tournament
+            </button>
+          )}
+
+          {((!isPlayoffs && currentRound) || (isPlayoffs && (tournament.playoffMatches || []).length === 0)) && (tournament.status as any) !== 'FINISHED' && (
+            <div className="flex gap-2 items-center">
+              {showAdvanceConfirm && (
+                <span className="text-[10px] font-black uppercase tracking-widest text-amber-600">Pods not locked. Proceed?</span>
+              )}
+              <button
+                onClick={handleAdvanceRound}
+                disabled={isAdvancing}
+                className={`px-6 py-2 rounded-full font-black uppercase tracking-widest text-xs transition-all shadow-lg flex items-center gap-2 ${
+                  isAdvancing ? 'bg-outline-variant cursor-not-allowed' : 
+                  showAdvanceConfirm ? 'bg-amber-600 text-white hover:bg-amber-700' :
+                  'bg-primary text-on-primary hover:bg-primary-dim'
+                }`}
+              >
+                {isAdvancing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {showAdvanceConfirm ? 'Yes, Advance' : 
+                 tournament.status === 'SEEDING' ? 'Complete Seeding' : 
+                 tournament.status === 'PLAYOFFS' ? 'Start Playoff Matches' :
+                 tournament.currentRoundIndex === 3 ? 'Choose Team Mates' : 
+                 `Complete Ladder ${tournament.currentRoundIndex}`}
+              </button>
+              {showAdvanceConfirm && (
+                <button
+                  onClick={() => setShowAdvanceConfirm(false)}
+                  className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"
+                >
+                  <RotateCcw className="w-4 h-4 text-gray-600" />
+                </button>
+              )}
+            </div>
           )}
           <button
             onClick={downloadResults}
@@ -519,6 +659,13 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
             title="Download Results"
           >
             <Download className="w-5 h-5" />
+          </button>
+          <button
+            onClick={downloadScorecards}
+            className="p-2 bg-surface-container-low border border-outline rounded-full hover:bg-surface-container transition-all text-on-surface"
+            title="Download Scorecards"
+          >
+            <Clock className="w-5 h-5" />
           </button>
         </div>
       </div>
@@ -611,12 +758,12 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className="grid grid-cols-1 lg:grid-cols-12 gap-8"
+            className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8"
           >
             {/* Score Entry Area */}
-            <div className="lg:col-span-8">
+            <div className="lg:col-span-8 order-2 lg:order-1">
               <div className="bg-surface rounded-3xl border border-outline overflow-hidden shadow-2xl">
-                <div className="p-8 sm:p-12 space-y-12">
+                <div className="p-4 sm:p-8 lg:p-12 space-y-8 sm:space-y-12">
                   {!isPlayoffs ? (
                     (selectedPod?.matches || []).map((match, idx) => {
                       const p1 = (tournament.players || []).find(p => p.id === match.playerIds[0]);
@@ -625,57 +772,57 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                       const p4 = (tournament.players || []).find(p => p.id === match.playerIds[3]);
 
                       return (
-                        <div key={match.id} className="space-y-6">
+                        <div key={match.id} className="space-y-4 sm:space-y-6">
                           <div className="flex items-center gap-4">
                             <div className="h-px flex-1 bg-outline-variant opacity-30"></div>
                             <div className="text-[10px] font-mono font-bold text-on-surface-variant uppercase tracking-widest">Match {idx + 1}</div>
                             <div className="h-px flex-1 bg-outline-variant opacity-30"></div>
                           </div>
                           
-                          <div className="flex flex-col sm:flex-row items-center gap-6 sm:gap-12">
-                            <div className="flex-1 flex items-center justify-end gap-4 w-full">
+                          <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-12">
+                            <div className="flex-1 flex items-center justify-end gap-3 sm:gap-4 w-full">
                               <div className="text-right">
-                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p1?.name}</div>
-                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p2?.name}</div>
-                                <div className="text-[10px] font-mono text-on-surface-variant opacity-60 mt-1">#{p1?.jerseyNumber} + #{p2?.jerseyNumber}</div>
+                                <div className="text-sm sm:text-lg font-black uppercase text-on-surface leading-tight">{p1?.name}</div>
+                                <div className="text-sm sm:text-lg font-black uppercase text-on-surface leading-tight">{p2?.name}</div>
+                                <div className="text-[8px] sm:text-[10px] font-mono text-on-surface-variant opacity-60 mt-0.5">#{p1?.jerseyNumber} + #{p2?.jerseyNumber}</div>
                               </div>
-                              <div className="flex -space-x-4">
+                              <div className="flex -space-x-3 sm:-space-x-4">
                                 {p1?.avatarUrl ? (
-                                  <img src={p1.avatarUrl} alt={p1.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                  <img src={p1.avatarUrl} alt={p1.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
                                 ) : (
-                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p1?.jerseyNumber}</div>
+                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p1?.jerseyNumber}</div>
                                 )}
                                 {p2?.avatarUrl ? (
-                                  <img src={p2.avatarUrl} alt={p2.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                  <img src={p2.avatarUrl} alt={p2.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
                                 ) : (
-                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p2?.jerseyNumber}</div>
+                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p2?.jerseyNumber}</div>
                                 )}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 sm:gap-4">
                               <button 
                                 ref={el => { scoreRefs.current[`${match.id}-1`] = el; }}
                                 onClick={() => setActiveInput({ matchId: match.id, side: 1 })}
                                 onFocus={() => setActiveInput({ matchId: match.id, side: 1 })}
-                                className={`w-20 h-24 rounded-2xl border-4 flex items-center justify-center text-4xl font-mono font-black transition-all ${
+                                className={`w-16 h-20 sm:w-20 sm:h-24 rounded-2xl border-4 flex items-center justify-center text-3xl sm:text-4xl font-mono font-black transition-all ${
                                   activeInput?.matchId === match.id && activeInput?.side === 1
-                                    ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
+                                    ? 'border-indigo-600 bg-indigo-600 text-white scale-110 shadow-xl'
                                     : 'border-outline-variant bg-surface-container-lowest text-on-surface'
                                 }`}
                               >
                                 {scores[match.id]?.s1 || '0'}
                               </button>
 
-                              <div className="text-2xl editorial-title text-on-surface-variant opacity-20 font-black italic">VS</div>
+                              <div className="text-xl sm:text-2xl editorial-title text-on-surface-variant opacity-20 font-black italic">VS</div>
 
                               <button 
                                 ref={el => { scoreRefs.current[`${match.id}-2`] = el; }}
                                 onClick={() => setActiveInput({ matchId: match.id, side: 2 })}
                                 onFocus={() => setActiveInput({ matchId: match.id, side: 2 })}
-                                className={`w-20 h-24 rounded-2xl border-4 flex items-center justify-center text-4xl font-mono font-black transition-all ${
+                                className={`w-16 h-20 sm:w-20 sm:h-24 rounded-2xl border-4 flex items-center justify-center text-3xl sm:text-4xl font-mono font-black transition-all ${
                                   activeInput?.matchId === match.id && activeInput?.side === 2
-                                    ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
+                                    ? 'border-rose-600 bg-rose-600 text-white scale-110 shadow-xl'
                                     : 'border-outline-variant bg-surface-container-lowest text-on-surface'
                                 }`}
                               >
@@ -683,23 +830,23 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                               </button>
                             </div>
 
-                            <div className="flex-1 flex items-center justify-start gap-4 w-full">
-                              <div className="flex -space-x-4">
+                            <div className="flex-1 flex items-center justify-start gap-3 sm:gap-4 w-full">
+                              <div className="flex -space-x-3 sm:-space-x-4">
                                 {p3?.avatarUrl ? (
-                                  <img src={p3.avatarUrl} alt={p3.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                  <img src={p3.avatarUrl} alt={p3.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
                                 ) : (
-                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p3?.jerseyNumber}</div>
+                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p3?.jerseyNumber}</div>
                                 )}
                                 {p4?.avatarUrl ? (
-                                  <img src={p4.avatarUrl} alt={p4.name} className="w-12 h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
+                                  <img src={p4.avatarUrl} alt={p4.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
                                 ) : (
-                                  <div className="w-12 h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[10px] font-black text-on-surface-variant">#{p4?.jerseyNumber}</div>
+                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p4?.jerseyNumber}</div>
                                 )}
                               </div>
                               <div className="text-left">
-                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p3?.name}</div>
-                                <div className="text-lg font-black uppercase text-on-surface leading-tight">{p4?.name}</div>
-                                <div className="text-[10px] font-mono text-on-surface-variant opacity-60 mt-1">#{p3?.jerseyNumber} + #{p4?.jerseyNumber}</div>
+                                <div className="text-sm sm:text-lg font-black uppercase text-on-surface leading-tight">{p3?.name}</div>
+                                <div className="text-sm sm:text-lg font-black uppercase text-on-surface leading-tight">{p4?.name}</div>
+                                <div className="text-[8px] sm:text-[10px] font-mono text-on-surface-variant opacity-60 mt-0.5">#{p3?.jerseyNumber} + #{p4?.jerseyNumber}</div>
                               </div>
                             </div>
                           </div>
@@ -707,10 +854,10 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                       );
                     })
                   ) : selectedPlayoffMatch && (
-                    <div className="space-y-12 py-8">
-                      <div className="flex flex-col sm:flex-row items-center gap-12">
+                    <div className="space-y-8 sm:space-y-12 py-4 sm:py-8">
+                      <div className="flex flex-col sm:flex-row items-center gap-8 sm:gap-12">
                         <div className="flex-1 text-center sm:text-right w-full">
-                          <div className="text-2xl font-black uppercase text-on-surface">{(tournament.playoffTeams || []).find(t => t.id === selectedPlayoffMatch.team1Id)?.name}</div>
+                          <div className="text-xl sm:text-2xl font-black uppercase text-on-surface">{(tournament.playoffTeams || []).find(t => t.id === selectedPlayoffMatch.team1Id)?.name}</div>
                         </div>
 
                         <div className="flex items-center gap-4">
@@ -718,24 +865,24 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                             ref={el => { scoreRefs.current[`${selectedPlayoffMatch.id}-1`] = el; }}
                             onClick={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 1 })}
                             onFocus={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 1 })}
-                            className={`w-24 h-32 rounded-2xl border-4 flex items-center justify-center text-5xl font-mono font-black transition-all ${
+                            className={`w-20 h-28 sm:w-24 sm:h-32 rounded-2xl border-4 flex items-center justify-center text-4xl sm:text-5xl font-mono font-black transition-all ${
                               activeInput?.matchId === selectedPlayoffMatch.id && activeInput?.side === 1
-                                ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
+                                ? 'border-indigo-600 bg-indigo-600 text-white scale-110 shadow-xl'
                                 : 'border-outline-variant bg-surface-container-lowest text-on-surface'
                             }`}
                           >
                             {scores[selectedPlayoffMatch.id]?.s1 || '0'}
                           </button>
 
-                          <div className="text-3xl editorial-title text-on-surface-variant opacity-20 font-black italic">VS</div>
+                          <div className="text-2xl sm:text-3xl editorial-title text-on-surface-variant opacity-20 font-black italic">VS</div>
 
                           <button 
                             ref={el => { scoreRefs.current[`${selectedPlayoffMatch.id}-2`] = el; }}
                             onClick={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 2 })}
                             onFocus={() => setActiveInput({ matchId: selectedPlayoffMatch.id, side: 2 })}
-                            className={`w-24 h-32 rounded-2xl border-4 flex items-center justify-center text-5xl font-mono font-black transition-all ${
+                            className={`w-20 h-28 sm:w-24 sm:h-32 rounded-2xl border-4 flex items-center justify-center text-4xl sm:text-5xl font-mono font-black transition-all ${
                               activeInput?.matchId === selectedPlayoffMatch.id && activeInput?.side === 2
-                                ? 'border-primary bg-primary text-on-primary scale-110 shadow-xl'
+                                ? 'border-rose-600 bg-rose-600 text-white scale-110 shadow-xl'
                                 : 'border-outline-variant bg-surface-container-lowest text-on-surface'
                             }`}
                           >
@@ -744,7 +891,7 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                         </div>
 
                         <div className="flex-1 text-center sm:text-left w-full">
-                          <div className="text-2xl font-black uppercase text-on-surface">{(tournament.playoffTeams || []).find(t => t.id === selectedPlayoffMatch.team2Id)?.name}</div>
+                          <div className="text-xl sm:text-2xl font-black uppercase text-on-surface">{(tournament.playoffTeams || []).find(t => t.id === selectedPlayoffMatch.team2Id)?.name}</div>
                         </div>
                       </div>
                     </div>
@@ -753,11 +900,11 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                   <button 
                     onClick={isPlayoffs ? handleSubmitPlayoffMatch : handleSubmitPod}
                     disabled={isLoading || (!isPlayoffs && selectedPod?.status === 'LOCKED') || (isPlayoffs && selectedPlayoffMatch?.status === 'LOCKED')}
-                    className={`w-full py-8 rounded-2xl flex items-center justify-center gap-4 font-black uppercase tracking-widest text-lg transition-all ${
+                    className={`w-full py-6 sm:py-8 rounded-2xl flex items-center justify-center gap-4 font-black uppercase tracking-widest text-base sm:text-lg transition-all ${
                       isLoading ? 'bg-outline-variant cursor-not-allowed' : 'bg-primary text-on-primary hover:bg-primary-dim shadow-2xl hover:scale-[1.01]'
                     }`}
                   >
-                    {isLoading ? <Loader2 className="w-8 h-8 animate-spin" /> : <Send className="w-8 h-8" />}
+                    {isLoading ? <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin" /> : <Send className="w-6 h-6 sm:w-8 sm:h-8" />}
                     {isLoading ? 'COMMITTING...' : isPlayoffs ? 'SUBMIT PLAYOFF SCORE' : 'LOCK & SUBMIT POD'}
                   </button>
                 </div>
@@ -765,9 +912,9 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
             </div>
 
             {/* Numpad Area */}
-            <div className="lg:col-span-4">
-              <div className="bg-surface p-8 rounded-3xl border border-outline sticky top-24 shadow-xl space-y-8">
-                <div className="grid grid-cols-3 gap-4">
+            <div className="lg:col-span-4 order-1 lg:order-2">
+              <div className="bg-surface p-4 sm:p-8 rounded-3xl border border-outline lg:sticky lg:top-24 shadow-xl space-y-4 sm:space-y-8">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4">
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, 'NEXT'].map((key) => (
                     <button
                       key={key}
@@ -778,8 +925,8 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                         }
                         else handleNumpad(key.toString());
                       }}
-                      className={`h-20 rounded-2xl flex items-center justify-center text-3xl font-black transition-all active:scale-95 ${
-                        key === 'NEXT' ? 'bg-primary text-on-primary col-span-1 text-xl' : 
+                      className={`h-16 sm:h-20 rounded-2xl flex items-center justify-center text-2xl sm:text-3xl font-black transition-all active:scale-95 ${
+                        key === 'NEXT' ? 'bg-primary text-on-primary col-span-1 text-base sm:text-xl' : 
                         key === 'C' ? 'bg-secondary text-on-secondary' : 
                         'bg-surface-container-low hover:bg-surface-container text-on-surface border border-outline-variant'
                       }`}
@@ -789,9 +936,9 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                   ))}
                 </div>
                 
-                <div className="p-6 bg-surface-container-lowest border border-outline-variant rounded-2xl text-center space-y-2">
-                  <div className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant opacity-50">Active Target</div>
-                  <div className="text-sm font-mono font-bold text-on-surface">
+                <div className="p-4 sm:p-6 bg-surface-container-lowest border border-outline-variant rounded-2xl text-center space-y-1 sm:space-y-2">
+                  <div className="text-[8px] sm:text-[10px] font-black uppercase tracking-widest text-on-surface-variant opacity-50">Active Target</div>
+                  <div className="text-xs sm:text-sm font-mono font-bold text-on-surface">
                     {activeInput ? (
                       isPlayoffs ? `PLAYOFF MATCH — SIDE ${activeInput.side}` : (
                         (() => {
@@ -799,7 +946,7 @@ export default function OperatorDesk({ tournament }: OperatorDeskProps) {
                           return `MATCH ${idx !== -1 ? idx + 1 : '?'} — SIDE ${activeInput.side}`;
                         })()
                       )
-                    ) : 'SELECT SCORE CELL'}
+                    ) : 'SELECT A SCORE INPUT'}
                   </div>
                 </div>
               </div>

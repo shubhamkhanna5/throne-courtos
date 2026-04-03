@@ -3,25 +3,45 @@ import { Tournament, Player, Match, PlayoffTeam, PlayoffMatch } from '../types';
 
 export const tournamentService = {
   async getTournaments() {
+    const controller = new AbortController();
+    let timeoutId: any;
+    
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-      
+      timeoutId = setTimeout(() => controller.abort('timeout'), 30000); // 30s timeout
       const res = await fetch('/api/admin/tournaments', { signal: controller.signal });
-      clearTimeout(timeoutId);
       
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch tournaments');
-      return data;
-    } catch (err) {
-      console.error('[TournamentService] getTournaments error:', err);
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('[TournamentService] getTournaments API error:', res.status, text.slice(0, 100));
+        throw new Error(`Failed to fetch tournaments: ${res.status}`);
+      }
+
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text();
+        console.error('[TournamentService] getTournaments non-JSON response:', text.slice(0, 100));
+        throw new Error('Received non-JSON response from server');
+      }
+
+      return await res.json();
+    } catch (err: any) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted') || err.message === 'timeout') {
+        console.warn('[TournamentService] getTournaments request timed out or was aborted');
+        return [];
+      }
+      console.error('[TournamentService] getTournaments error:', err.message || err);
       return [];
+    } finally {
+      clearTimeout(timeoutId);
     }
   },
 
   async getTournament(id?: string) {
     let tId = id;
     console.log('[TournamentService] getTournament called with id:', tId);
+    const controller = new AbortController();
+    let timeoutId: any;
+
     try {
       if (!tId) {
         const tournaments = await this.getTournaments();
@@ -33,11 +53,8 @@ export const tournamentService = {
         console.log('[TournamentService] Using latest tournament id:', tId);
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-
+      timeoutId = setTimeout(() => controller.abort('timeout'), 30000); // 30s timeout
       const res = await fetch(`/api/admin/tournament/${tId}`, { signal: controller.signal });
-      clearTimeout(timeoutId);
 
       if (!res.ok) {
         if (res.status === 404) {
@@ -45,9 +62,16 @@ export const tournamentService = {
           localStorage.removeItem('courtos_current_tournament_id');
           return null;
         }
-        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
-        console.error('[TournamentService] API error:', res.status, errorData);
-        throw new Error(errorData.error || `Failed to fetch tournament: ${res.status}`);
+        const text = await res.text();
+        console.error('[TournamentService] getTournament API error:', res.status, text.slice(0, 100));
+        throw new Error(`Failed to fetch tournament: ${res.status}`);
+      }
+
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text();
+        console.error('[TournamentService] getTournament non-JSON response:', text.slice(0, 100));
+        throw new Error('Received non-JSON response from server');
       }
 
       const data = await res.json();
@@ -162,11 +186,15 @@ export const tournamentService = {
 
     console.log('[TournamentService] Successfully mapped tournament:', result.id);
     return result;
-    } catch (err) {
-      console.error('[TournamentService] getTournament fatal error:', err);
-      // Don't clear ID on every error, only on 404
-      // localStorage.removeItem('courtos_current_tournament_id');
+    } catch (err: any) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted') || err.message === 'timeout') {
+        console.warn('[TournamentService] getTournament request timed out or was aborted');
+        return null;
+      }
+      console.error('[TournamentService] getTournament fatal error:', err.message || err);
       return null;
+    } finally {
+      clearTimeout(timeoutId);
     }
   },
 
@@ -203,25 +231,56 @@ export const tournamentService = {
   },
 
   async submitScore(podId: string, matches: any[], tournamentId: string) {
-    const res = await fetch('/api/admin/submit-score', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ podId, matches, tournamentId })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to submit scores');
-    return data;
+    try {
+      // Try Supabase RPC first (New Architecture)
+      const { error } = await supabase.rpc('submit_pod', {
+        p_pod_id: podId,
+        p_matches: matches
+      });
+
+      if (error) {
+        console.warn('[TournamentService] submit_pod RPC failed, falling back to Service API:', error);
+        throw error; // Trigger fallback in catch block
+      }
+      return { success: true };
+    } catch (err) {
+      // Fallback to Express API
+      const res = await fetch('/api/admin/submit-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ podId, matches, tournamentId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit scores');
+      return data;
+    }
   },
 
   async submitPlayoffScore(matchId: string, score1: number, score2: number) {
-    const res = await fetch('/api/admin/submit-playoff-score', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ matchId, score1, score2 })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to submit playoff score');
-    return data;
+    try {
+      // Try Supabase RPC first
+      const { error } = await supabase.rpc('submit_playoff_score', {
+        p_match_id: matchId,
+        p_score1: score1,
+        p_score2: score2
+      });
+
+      if (error) {
+        console.warn('[TournamentService] submit_playoff_score RPC failed, falling back to Service API:', error);
+        throw error;
+      }
+      return { success: true };
+    } catch (err) {
+      // Fallback to Express API
+      const res = await fetch('/api/admin/submit-playoff-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matchId, score1, score2 })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit playoff score');
+      return data;
+    }
   },
 
   async draftPartner(tournamentId: string, captainId: string, partnerId: string) {
@@ -243,6 +302,17 @@ export const tournamentService = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Reset failed');
+    return data;
+  },
+
+  async finishTournament(id: string) {
+    const res = await fetch('/api/admin/finish-tournament', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Finish failed');
     return data;
   },
 
