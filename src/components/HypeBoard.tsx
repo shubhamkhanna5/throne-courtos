@@ -4,14 +4,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowUp, ArrowDown, Minus, Trophy, Download, Radio } from 'lucide-react';
 import { generatePDF } from '../lib/pdf';
 
-// Helper for Avatar CDN Optimization
-const getOptimizedAvatar = (url: string | undefined) => {
-  if (!url) return null;
-  // If using Cloudflare Image Resizing, we could append ?width=100&height=100&fit=cover
-  // For now, we just return the URL as is, but this is where the logic would go.
-  return `${url}?w=128&q=75`; 
-};
-
 interface HypeBoardProps {
   tournament: Tournament;
 }
@@ -229,18 +221,9 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
 
                   {/* Player Info */}
                   <div className="flex-1 min-w-0 flex items-center gap-2 sm:gap-4">
-                    {player.avatarUrl ? (
-                      <img 
-                        src={getOptimizedAvatar(player.avatarUrl) || ''} 
-                        alt={player.name} 
-                        className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl object-cover border-2 border-outline-variant group-hover:border-on-primary/30 shadow-md" 
-                        referrerPolicy="no-referrer" 
-                      />
-                    ) : (
-                      <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-surface-container-high flex items-center justify-center border-2 border-outline-variant group-hover:border-on-primary/30 group-hover:bg-on-primary/10">
-                        <Trophy className="w-4 h-4 sm:w-6 sm:h-6 text-on-surface-variant opacity-20 group-hover:text-on-primary/40" />
-                      </div>
-                    )}
+                    <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-surface-container-high flex items-center justify-center border-2 border-outline-variant group-hover:border-on-primary/30 group-hover:bg-on-primary/10">
+                      <Trophy className="w-4 h-4 sm:w-6 sm:h-6 text-on-surface-variant opacity-20 group-hover:text-on-primary/40" />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1 sm:gap-2">
                         <span className="text-sm sm:text-lg font-black truncate uppercase tracking-tight text-on-surface group-hover:text-on-primary">{player.name}</span>

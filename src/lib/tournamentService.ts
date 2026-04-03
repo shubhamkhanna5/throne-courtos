@@ -163,7 +163,6 @@ export const tournamentService = {
         pointDiff: p.point_diff,
         pointsScored: p.points_scored,
         podWins: p.pod_wins,
-        avatarUrl: p.avatar_url,
         lastRank: p.last_rank
       })) || [],
       rounds: rounds,
@@ -220,20 +219,29 @@ export const tournamentService = {
   },
 
   async advanceRound(tournamentId: string) {
-    const res = await fetch('/api/admin/advance-round', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tournamentId })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Round advancement failed');
-    return data;
+    try {
+      const { data, error } = await supabase.rpc('advance_tournament', {
+        p_tournament_id: tournamentId
+      });
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('[TournamentService] advance_tournament RPC failed, falling back to Service API:', err);
+      const res = await fetch('/api/admin/advance-round', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tournamentId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Round advancement failed');
+      return data;
+    }
   },
 
   async submitScore(podId: string, matches: any[], tournamentId: string) {
     try {
       // Try Supabase RPC first (New Architecture)
-      const { error } = await supabase.rpc('submit_pod', {
+      const { data, error } = await supabase.rpc('submit_pod', {
         p_pod_id: podId,
         p_matches: matches
       });
@@ -242,7 +250,7 @@ export const tournamentService = {
         console.warn('[TournamentService] submit_pod RPC failed, falling back to Service API:', error);
         throw error; // Trigger fallback in catch block
       }
-      return { success: true };
+      return data;
     } catch (err) {
       // Fallback to Express API
       const res = await fetch('/api/admin/submit-score', {
@@ -259,7 +267,7 @@ export const tournamentService = {
   async submitPlayoffScore(matchId: string, score1: number, score2: number) {
     try {
       // Try Supabase RPC first
-      const { error } = await supabase.rpc('submit_playoff_score', {
+      const { data, error } = await supabase.rpc('submit_playoff_score', {
         p_match_id: matchId,
         p_score1: score1,
         p_score2: score2
@@ -269,7 +277,7 @@ export const tournamentService = {
         console.warn('[TournamentService] submit_playoff_score RPC failed, falling back to Service API:', error);
         throw error;
       }
-      return { success: true };
+      return data;
     } catch (err) {
       // Fallback to Express API
       const res = await fetch('/api/admin/submit-playoff-score', {
@@ -284,39 +292,74 @@ export const tournamentService = {
   },
 
   async draftPartner(tournamentId: string, captainId: string, partnerId: string) {
-    const res = await fetch('/api/admin/draft-partner', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tournamentId, captainId, partnerId })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Drafting failed');
-    return data;
+    try {
+      const { data, error } = await supabase.rpc('draft_partner', {
+        p_tournament_id: tournamentId,
+        p_captain_id: captainId,
+        p_partner_id: partnerId
+      });
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('[TournamentService] draft_partner RPC failed, falling back to Service API:', err);
+      const res = await fetch('/api/admin/draft-partner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tournamentId, captainId, partnerId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Drafting failed');
+      return data;
+    }
   },
 
   async resetTournament(id: string) {
-    const res = await fetch('/api/admin/reset-tournament', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Reset failed');
-    return data;
+    try {
+      const { data, error } = await supabase.rpc('reset_tournament', {
+        p_tournament_id: id
+      });
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('[TournamentService] reset_tournament RPC failed, falling back to Service API:', err);
+      const res = await fetch('/api/admin/reset-tournament', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Reset failed');
+      return data;
+    }
   },
 
   async finishTournament(id: string) {
-    const res = await fetch('/api/admin/finish-tournament', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Finish failed');
-    return data;
+    try {
+      const { data, error } = await supabase.rpc('finish_tournament', {
+        p_tournament_id: id
+      });
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('[TournamentService] finish_tournament RPC failed, falling back to Service API:', err);
+      const res = await fetch('/api/admin/finish-tournament', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Finish failed');
+      return data;
+    }
   },
 
   async deleteTournament(id: string) {
+    if (supabase) {
+      const { error } = await supabase.rpc('delete_tournament', { p_tournament_id: id });
+      if (!error) return { success: true };
+      console.error('[TournamentService] RPC delete_tournament failed:', error.message);
+    }
+
     const res = await fetch('/api/admin/delete-tournament', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

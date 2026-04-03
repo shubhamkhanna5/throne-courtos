@@ -31,12 +31,10 @@ CREATE TABLE IF NOT EXISTS players (
   point_diff INTEGER DEFAULT 0,
   points_scored INTEGER DEFAULT 0,
   pod_wins INTEGER DEFAULT 0,
-  last_rank INTEGER DEFAULT 0,
-  avatar_url TEXT
+  last_rank INTEGER DEFAULT 0
 );
 
 -- Ensure all columns exist for existing tables (Migrations)
-ALTER TABLE players ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
 CREATE TABLE IF NOT EXISTS rounds (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -157,7 +155,9 @@ $$ LANGUAGE plpgsql;
 -- 3. RPC: SETUP TOURNAMENT
 DROP FUNCTION IF EXISTS setup_tournament(TEXT, TEXT, JSONB);
 CREATE OR REPLACE FUNCTION setup_tournament(p_name TEXT, p_mode TEXT, p_players JSONB)
-RETURNS UUID AS $$
+RETURNS UUID 
+SECURITY DEFINER
+AS $$
 DECLARE
   v_tournament_id UUID;
   v_player JSONB;
@@ -165,8 +165,8 @@ BEGIN
   INSERT INTO tournaments (name, mode) VALUES (p_name, p_mode) RETURNING id INTO v_tournament_id;
   
   FOR v_player IN SELECT * FROM jsonb_array_elements(p_players) LOOP
-    INSERT INTO players (name, contact, dupr_id, jersey_number, tournament_id, avatar_url)
-    VALUES (v_player->>'name', v_player->>'contact', v_player->>'duprId', v_player->>'jerseyNumber', v_tournament_id, v_player->>'avatarUrl');
+    INSERT INTO players (name, contact, dupr_id, jersey_number, tournament_id)
+    VALUES (v_player->>'name', v_player->>'contact', v_player->>'duprId', v_player->>'jerseyNumber', v_tournament_id);
   END LOOP;
   
   RETURN v_tournament_id;
@@ -176,7 +176,9 @@ $$ LANGUAGE plpgsql;
 -- 4. RPC: START SEEDING
 DROP FUNCTION IF EXISTS start_seeding(UUID);
 CREATE OR REPLACE FUNCTION start_seeding(p_tournament_id UUID)
-RETURNS VOID AS $$
+RETURNS VOID 
+SECURITY DEFINER
+AS $$
 DECLARE
   v_round_id UUID;
 BEGIN
@@ -204,7 +206,9 @@ $$ LANGUAGE plpgsql;
 -- 5. RPC: SUBMIT POD
 DROP FUNCTION IF EXISTS submit_pod(UUID, JSONB);
 CREATE OR REPLACE FUNCTION submit_pod(p_pod_id UUID, p_matches JSONB)
-RETURNS VOID AS $$
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
 DECLARE
   v_match JSONB;
   v_round_id UUID;
@@ -231,7 +235,6 @@ BEGIN
     UPDATE rounds SET status = 'LOCKED' WHERE id = v_round_id;
     
     -- 3. Process Round Results (Ranking & Movement)
-    -- 3. Process Round Results (Ranking & Movement)
     -- Calculate stats for ALL players in the round
     CREATE TEMP TABLE temp_round_stats AS
     SELECT 
@@ -244,7 +247,13 @@ BEGIN
           END) as pts,
       SUM(CASE WHEN m.p1_id = p.id OR m.p2_id = p.id THEN m.score1 - m.score2 ELSE m.score2 - m.score1 END) as diff,
       SUM(CASE WHEN m.p1_id = p.id OR m.p2_id = p.id THEN m.score1 ELSE m.score2 END) as scored,
-      COUNT(*) FILTER (WHERE (m.p1_id = p.id OR m.p2_id = p.id AND m.score1 > m.score2) OR (m.p3_id = p.id OR m.p4_id = p.id AND m.score2 > m.score1)) as wins
+      COUNT(*) FILTER (
+        WHERE (
+          (m.p1_id = p.id OR m.p2_id = p.id) AND m.score1 > m.score2
+        ) OR (
+          (m.p3_id = p.id OR m.p4_id = p.id) AND m.score2 > m.score1
+        )
+      ) as wins
     FROM players p
     JOIN pod_players pp ON p.id = pp.player_id
     JOIN pods pd ON pp.pod_id = pd.id
@@ -275,22 +284,66 @@ BEGIN
 
     DROP TABLE temp_round_stats;
 
-    -- 4. GLOBAL RANKING REBUILD (DETERMINISTIC)
-    UPDATE players p
-    SET last_rank = p.rank
-    WHERE tournament_id = v_tournament_id;
+    -- 4. MOVEMENT MATRIX (POD-BASED)
+    CREATE TEMP TABLE temp_movement (
+      player_id UUID,
+      new_rank INTEGER
+    );
 
-    WITH ranked AS (
-      SELECT id, row_number() OVER (
-        ORDER BY points DESC, point_diff DESC, points_scored DESC, pod_wins DESC, id ASC
-      ) as new_rank
-      FROM players
-      WHERE tournament_id = v_tournament_id
+    WITH ordered_pods AS (
+      SELECT 
+        p.id as pod_id,
+        p.court_name,
+        p.pod_name,
+        row_number() OVER (ORDER BY p.court_name, p.pod_name) as pod_index
+      FROM pods p
+      WHERE p.round_id = v_round_id
+    ),
+    pod_results AS (
+      SELECT 
+        pp.player_id,
+        pp.pod_rank,
+        op.pod_index
+      FROM pod_players pp
+      JOIN ordered_pods op ON pp.pod_id = op.pod_id
+    ),
+    movement AS (
+      SELECT 
+        player_id,
+        pod_rank,
+        pod_index,
+        CASE
+          -- TOP POD
+          WHEN pod_index = 1 AND pod_rank <= 2 THEN pod_index
+          WHEN pod_index = 1 AND pod_rank > 2 THEN pod_index + 1
+          
+          -- BOTTOM POD
+          WHEN pod_index = (SELECT MAX(pod_index) FROM ordered_pods) AND pod_rank <= 2 THEN pod_index - 1
+          WHEN pod_index = (SELECT MAX(pod_index) FROM ordered_pods) AND pod_rank > 2 THEN pod_index
+          
+          -- MIDDLE PODS
+          WHEN pod_rank <= 2 THEN pod_index - 1
+          ELSE pod_index + 1
+        END as new_pod_index
+      FROM pod_results
+    ),
+    ranked AS (
+      SELECT 
+        m.player_id,
+        row_number() OVER (ORDER BY m.new_pod_index, m.pod_rank) as new_rank
+      FROM movement m
     )
+    INSERT INTO temp_movement
+    SELECT player_id, new_rank FROM ranked;
+
+    -- Apply ranks
     UPDATE players p
-    SET rank = r.new_rank
-    FROM ranked r
-    WHERE p.id = r.id;
+    SET last_rank = p.rank,
+        rank = tm.new_rank
+    FROM temp_movement tm
+    WHERE p.id = tm.player_id;
+
+    DROP TABLE temp_movement;
 
     -- 5. Advance Tournament Status
     SELECT status, current_round_index INTO v_mode, v_current_round_index FROM tournaments WHERE id = v_tournament_id;
@@ -309,13 +362,17 @@ BEGIN
       END IF;
     END IF;
   END IF;
+
+  RETURN get_tournament_state(v_tournament_id);
 END;
 $$ LANGUAGE plpgsql;
 
 -- 6. RPC: DRAFT PARTNER
 DROP FUNCTION IF EXISTS draft_partner(UUID, UUID, UUID);
 CREATE OR REPLACE FUNCTION draft_partner(p_tournament_id UUID, p_captain_id UUID, p_partner_id UUID)
-RETURNS JSONB AS $$
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
 DECLARE
   v_captain_name TEXT;
   v_partner_name TEXT;
@@ -333,26 +390,43 @@ $$ LANGUAGE plpgsql;
 -- 7. RPC: GENERATE PLAYOFF BRACKET
 DROP FUNCTION IF EXISTS generate_playoffs(UUID);
 CREATE OR REPLACE FUNCTION generate_playoffs(p_tournament_id UUID)
-RETURNS VOID AS $$
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
 DECLARE
   v_team_ids UUID[];
+  v_count INTEGER;
 BEGIN
   SELECT array_agg(id ORDER BY (SELECT rank FROM players WHERE id = captain_id) ASC) 
   INTO v_team_ids 
   FROM playoff_teams 
   WHERE tournament_id = p_tournament_id;
   
+  v_count := array_length(v_team_ids, 1);
+  
+  IF v_count < 4 THEN
+    RAISE EXCEPTION 'Cannot generate playoffs: only % teams found, need 4', v_count;
+  END IF;
+
   -- Semis: 1 vs 4, 2 vs 3
-  INSERT INTO playoff_matches (tournament_id, team1_id, team2_id, stage) VALUES
-  (p_tournament_id, v_team_ids[1], v_team_ids[4], 'SEMIS'),
-  (p_tournament_id, v_team_ids[2], v_team_ids[3], 'SEMIS');
+  INSERT INTO playoff_matches (tournament_id, team1_id, team2_id, stage, status) VALUES
+  (p_tournament_id, v_team_ids[1], v_team_ids[4], 'SEMIS', 'PENDING'),
+  (p_tournament_id, v_team_ids[2], v_team_ids[3], 'SEMIS', 'PENDING');
+
+  -- Final (TBD)
+  INSERT INTO playoff_matches (tournament_id, team1_id, team2_id, stage, status) VALUES
+  (p_tournament_id, NULL, NULL, 'FINALS', 'LOCKED');
+
+  RETURN get_tournament_state(p_tournament_id);
 END;
 $$ LANGUAGE plpgsql;
 
--- 8. RPC: SUBMIT PLAYOFF MATCH
-DROP FUNCTION IF EXISTS submit_playoff_match(UUID, INTEGER, INTEGER);
-CREATE OR REPLACE FUNCTION submit_playoff_match(p_match_id UUID, p_score1 INTEGER, p_score2 INTEGER)
-RETURNS VOID AS $$
+-- 8. RPC: SUBMIT PLAYOFF SCORE
+DROP FUNCTION IF EXISTS submit_playoff_score(UUID, INTEGER, INTEGER);
+CREATE OR REPLACE FUNCTION submit_playoff_score(p_match_id UUID, p_score1 INTEGER, p_score2 INTEGER)
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
 DECLARE
   v_tournament_id UUID;
   v_stage TEXT;
@@ -375,16 +449,23 @@ BEGIN
       -- Get winners
       SELECT array_agg(CASE WHEN score1 > score2 THEN team1_id ELSE team2_id END)
       INTO v_finalists
-      FROM playoff_matches
-      WHERE tournament_id = v_tournament_id AND stage = 'SEMIS';
+      FROM (
+        SELECT team1_id, team2_id, score1, score2 
+        FROM playoff_matches 
+        WHERE tournament_id = v_tournament_id AND stage = 'SEMIS'
+        ORDER BY id ASC -- Deterministic order
+      ) sub;
       
-      -- Create Final
-      INSERT INTO playoff_matches (tournament_id, team1_id, team2_id, stage)
-      VALUES (v_tournament_id, v_finalists[1], v_finalists[2], 'FINALS');
+      -- Update Final
+      UPDATE playoff_matches 
+      SET team1_id = v_finalists[1], team2_id = v_finalists[2], status = 'PENDING'
+      WHERE tournament_id = v_tournament_id AND stage = 'FINALS';
     END IF;
   ELSIF v_stage = 'FINALS' THEN
     UPDATE tournaments SET status = 'FINISHED' WHERE id = v_tournament_id;
   END IF;
+
+  RETURN get_tournament_state(v_tournament_id);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -411,7 +492,9 @@ $$ LANGUAGE plpgsql;
 -- 11. RPC: GET TOURNAMENT STATE
 DROP FUNCTION IF EXISTS get_tournament_state(UUID);
 CREATE OR REPLACE FUNCTION get_tournament_state(p_tournament_id UUID)
-RETURNS JSONB AS $$
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
 DECLARE
   v_result JSONB;
 BEGIN
@@ -433,8 +516,7 @@ BEGIN
         'pointDiff', p.point_diff,
         'pointsScored', p.points_scored,
         'podWins', p.pod_wins,
-        'lastRank', p.last_rank,
-        'avatarUrl', p.avatar_url
+        'lastRank', p.last_rank
       )) FROM players p WHERE p.tournament_id = t.id
     ), '[]'::jsonb),
     'rounds', COALESCE((
@@ -493,21 +575,95 @@ $$ LANGUAGE plpgsql;
 -- 12. RPC: FINISH TOURNAMENT
 DROP FUNCTION IF EXISTS finish_tournament(UUID);
 CREATE OR REPLACE FUNCTION finish_tournament(p_tournament_id UUID)
-RETURNS VOID AS $$
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
 BEGIN
   UPDATE tournaments SET status = 'FINISHED' WHERE id = p_tournament_id;
+  RETURN get_tournament_state(p_tournament_id);
 END;
 $$ LANGUAGE plpgsql;
 
--- 13. ROW LEVEL SECURITY (RLS)
-ALTER TABLE tournaments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE players ENABLE ROW LEVEL SECURITY;
-ALTER TABLE rounds ENABLE ROW LEVEL SECURITY;
-ALTER TABLE pods ENABLE ROW LEVEL SECURITY;
-ALTER TABLE pod_players ENABLE ROW LEVEL SECURITY;
-ALTER TABLE matches ENABLE ROW LEVEL SECURITY;
-ALTER TABLE playoff_teams ENABLE ROW LEVEL SECURITY;
-ALTER TABLE playoff_matches ENABLE ROW LEVEL SECURITY;
+-- 13. RPC: RESET TOURNAMENT
+DROP FUNCTION IF EXISTS reset_tournament(UUID);
+CREATE OR REPLACE FUNCTION reset_tournament(p_tournament_id UUID)
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
+BEGIN
+  DELETE FROM matches WHERE tournament_id = p_tournament_id;
+  DELETE FROM playoff_matches WHERE tournament_id = p_tournament_id;
+  DELETE FROM playoff_teams WHERE tournament_id = p_tournament_id;
+  DELETE FROM rounds WHERE tournament_id = p_tournament_id;
+  
+  UPDATE tournaments 
+  SET status = 'SETUP', current_round_index = 0 
+  WHERE id = p_tournament_id;
+  
+  UPDATE players 
+  SET points = 0, point_diff = 0, points_scored = 0, pod_wins = 0, rank = 0, last_rank = 0
+  WHERE tournament_id = p_tournament_id;
+  
+  RETURN get_tournament_state(p_tournament_id);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 14. RPC: ADVANCE TOURNAMENT
+DROP FUNCTION IF EXISTS advance_tournament(UUID);
+CREATE OR REPLACE FUNCTION advance_tournament(p_tournament_id UUID)
+RETURNS JSONB 
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_status TEXT;
+  v_round_idx INTEGER;
+  v_round_id UUID;
+BEGIN
+  SELECT status, current_round_index INTO v_status, v_round_idx FROM tournaments WHERE id = p_tournament_id;
+  
+  IF v_status = 'PLAYOFFS' THEN
+    -- Generate playoffs if not already there
+    IF NOT EXISTS (SELECT 1 FROM playoff_matches WHERE tournament_id = p_tournament_id) THEN
+      PERFORM generate_playoffs(p_tournament_id);
+    END IF;
+  ELSIF v_status = 'SEEDING' THEN
+    UPDATE tournaments SET status = 'LADDER', current_round_index = 1 WHERE id = p_tournament_id;
+    INSERT INTO rounds (tournament_id, number, type) VALUES (p_tournament_id, 2, 'LADDER') RETURNING id INTO v_round_id;
+    PERFORM generate_round_pods(p_tournament_id, v_round_id);
+  ELSIF v_status = 'LADDER' THEN
+    IF v_round_idx < 3 THEN
+      UPDATE tournaments SET current_round_index = v_round_idx + 1 WHERE id = p_tournament_id;
+      INSERT INTO rounds (tournament_id, number, type) VALUES (p_tournament_id, v_round_idx + 2, 'LADDER') RETURNING id INTO v_round_id;
+      PERFORM generate_round_pods(p_tournament_id, v_round_id);
+    ELSE
+      UPDATE tournaments SET status = 'PLAYOFFS' WHERE id = p_tournament_id;
+    END IF;
+  END IF;
+  
+  RETURN get_tournament_state(p_tournament_id);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 15. RPC: DELETE TOURNAMENT
+DROP FUNCTION IF EXISTS delete_tournament(UUID);
+CREATE OR REPLACE FUNCTION delete_tournament(p_tournament_id UUID)
+RETURNS VOID 
+SECURITY DEFINER
+AS $$
+BEGIN
+  DELETE FROM tournaments WHERE id = p_tournament_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 16. ROW LEVEL SECURITY (RLS) - DISABLED FOR STABILITY
+ALTER TABLE tournaments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE players DISABLE ROW LEVEL SECURITY;
+ALTER TABLE rounds DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pods DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pod_players DISABLE ROW LEVEL SECURITY;
+ALTER TABLE matches DISABLE ROW LEVEL SECURITY;
+ALTER TABLE playoff_teams DISABLE ROW LEVEL SECURITY;
+ALTER TABLE playoff_matches DISABLE ROW LEVEL SECURITY;
 
 -- 13. REALTIME (Enable for all tables)
 -- This allows the Hype Board and Operator Desk to update instantly
@@ -521,8 +677,16 @@ BEGIN;
   ALTER TABLE playoff_teams REPLICA IDENTITY FULL;
   ALTER TABLE playoff_matches REPLICA IDENTITY FULL;
 
-  DROP PUBLICATION IF EXISTS supabase_realtime;
-  CREATE PUBLICATION supabase_realtime FOR TABLE 
+  -- Ensure publication exists
+  DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+      CREATE PUBLICATION supabase_realtime;
+    END IF;
+  END $$;
+
+  -- Set tables for the publication (idempotent)
+  ALTER PUBLICATION supabase_realtime SET TABLE 
     tournaments, 
     players, 
     rounds, 
@@ -533,30 +697,30 @@ BEGIN;
     playoff_matches;
 COMMIT;
 
--- Basic Policies (Allow all for now, to be tightened later)
-DROP POLICY IF EXISTS "Allow public all access" ON tournaments;
-CREATE POLICY "Allow public all access" ON tournaments FOR ALL USING (true) WITH CHECK (true);
+-- Policies: Public Read, Authenticated/Service Role Write
+DROP POLICY IF EXISTS "Public Read Access" ON tournaments;
+CREATE POLICY "Public Read Access" ON tournaments FOR SELECT USING (true);
 
-DROP POLICY IF EXISTS "Allow public all access" ON players;
-CREATE POLICY "Allow public all access" ON players FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Read Access" ON players;
+CREATE POLICY "Public Read Access" ON players FOR SELECT USING (true);
 
-DROP POLICY IF EXISTS "Allow public all access" ON rounds;
-CREATE POLICY "Allow public all access" ON rounds FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Read Access" ON rounds;
+CREATE POLICY "Public Read Access" ON rounds FOR SELECT USING (true);
 
-DROP POLICY IF EXISTS "Allow public all access" ON pods;
-CREATE POLICY "Allow public all access" ON pods FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Read Access" ON pods;
+CREATE POLICY "Public Read Access" ON pods FOR SELECT USING (true);
 
-DROP POLICY IF EXISTS "Allow public all access" ON pod_players;
-CREATE POLICY "Allow public all access" ON pod_players FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Read Access" ON pod_players;
+CREATE POLICY "Public Read Access" ON pod_players FOR SELECT USING (true);
 
-DROP POLICY IF EXISTS "Allow public all access" ON matches;
-CREATE POLICY "Allow public all access" ON matches FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Read Access" ON matches;
+CREATE POLICY "Public Read Access" ON matches FOR SELECT USING (true);
 
-DROP POLICY IF EXISTS "Allow public all access" ON playoff_teams;
-CREATE POLICY "Allow public all access" ON playoff_teams FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Read Access" ON playoff_teams;
+CREATE POLICY "Public Read Access" ON playoff_teams FOR SELECT USING (true);
 
-DROP POLICY IF EXISTS "Allow public all access" ON playoff_matches;
-CREATE POLICY "Allow public all access" ON playoff_matches FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Read Access" ON playoff_matches;
+CREATE POLICY "Public Read Access" ON playoff_matches FOR SELECT USING (true);
 
 -- Allow all for service role (implicit, but good to keep in mind)
 -- For the app, we'll use the service role key on the backend to bypass RLS for setup/reset

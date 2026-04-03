@@ -7,7 +7,7 @@ import TournamentBracket from './TournamentBracket';
 
 interface PlayoffDraftProps {
   tournament: Tournament;
-  onRefresh?: () => void;
+  onRefresh?: (silent?: boolean, newData?: Tournament) => void;
 }
 
 export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProps) {
@@ -37,8 +37,8 @@ export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProp
     if (isLoading || !tournament) return;
     setIsLoading(true);
     try {
-      await tournamentService.draftPartner(tournament.id, currentCaptain.id, playerId);
-      onRefresh?.();
+      const updated = await tournamentService.draftPartner(tournament.id, currentCaptain.id, playerId);
+      onRefresh?.(true, updated);
     } catch (err) {
       console.error('Draft partner error:', err);
       alert('Failed to draft partner. Please try again.');
@@ -50,8 +50,8 @@ export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProp
     if (isLoading || !tournament) return;
     setIsLoading(true);
     try {
-      await tournamentService.advanceRound(tournament.id);
-      onRefresh?.();
+      const updated = await tournamentService.advanceRound(tournament.id);
+      onRefresh?.(true, updated);
     } catch (err) {
       console.error('Finalize draft error:', err);
       alert(err instanceof Error ? err.message : 'Failed to finalize draft. Please try again.');

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, FormEvent, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, FormEvent, Component, ErrorInfo, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { Tournament } from './types';
 import { supabase } from './lib/supabase';
@@ -85,10 +85,23 @@ function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const fetchState = async (silent = false) => {
-    if (isLoading && silent) return; // Don't overlap silent fetches
+  const isFetchingRef = useRef(false);
+
+  const fetchState = async (silent = false, newData?: Tournament) => {
+    if (newData) {
+      console.log('[App] Updating state with provided data:', newData.id);
+      setTournament(newData);
+      setLastUpdate(new Date());
+      return;
+    }
+
+    if (isFetchingRef.current) {
+      console.log('[App] fetchState already in progress, skipping...');
+      return;
+    }
     
     try {
+      isFetchingRef.current = true;
       console.log(`[App] Starting fetchState (silent: ${silent})...`);
       if (!silent) setIsLoading(true);
       if (silent) setIsSyncing(true);
@@ -132,9 +145,8 @@ function AppContent() {
       });
 
       if (error) {
-        console.error('[App] RPC get_tournament_state failed:', error.message, error.hint, error.details);
-        console.warn('[App] Falling back to Service API...');
-        // Fallback to existing service if RPC fails (likely not created yet)
+        console.error('[App] RPC get_tournament_state failed:', error.message);
+        // Fallback to existing service if RPC fails
         const fallbackData = await tournamentService.getTournament(currentId || undefined);
         if (fallbackData) {
           setTournament(fallbackData as Tournament);
@@ -151,6 +163,7 @@ function AppContent() {
       console.error('[App] fetchState failed:', err);
       if (!silent) setTournament(null);
     } finally {
+      isFetchingRef.current = false;
       setIsLoading(false);
       setIsSyncing(false);
     }
@@ -431,15 +444,15 @@ function AppContent() {
                 <Route path="/players" element={tournament ? <PlayerPage tournament={tournament} /> : <NoTournament onSetup={() => setShowPinModal({ target: '/admin' })} />} />
                 
                 <Route path="/operator" element={
-                  isAuth ? (tournament ? <OperatorDesk tournament={tournament} onRefresh={() => fetchState(true)} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
+                  isAuth ? (tournament ? <OperatorDesk tournament={tournament} onRefresh={fetchState} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
                 } />
                 
                 <Route path="/playoffs" element={
-                  isAuth ? (tournament ? <PlayoffDraft tournament={tournament} onRefresh={() => fetchState(true)} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
+                  isAuth ? (tournament ? <PlayoffDraft tournament={tournament} onRefresh={fetchState} /> : <NoTournament onSetup={() => navigate('/admin')} />) : <Navigate to="/" />
                 } />
                 
                 <Route path="/admin" element={
-                  isAuth ? <Setup tournament={tournament} onRefresh={() => fetchState(true)} /> : <Navigate to="/" />
+                  isAuth ? <Setup tournament={tournament} onRefresh={fetchState} /> : <Navigate to="/" />
                 } />
               </Routes>
             </motion.div>

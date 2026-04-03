@@ -136,7 +136,6 @@ async function startServer() {
         email: p.email,
         dupr_id: p.duprId,
         jersey_number: p.jerseyNumber,
-        avatar_url: p.avatarUrl,
         tournament_id: tData.id,
         rank: 0,
         points: 0,

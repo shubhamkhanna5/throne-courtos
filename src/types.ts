@@ -13,7 +13,6 @@ export interface Player {
   pointsScored: number;
   podWins: number;
   lastRank?: number;
-  avatarUrl?: string;
 }
 
 export interface Match {

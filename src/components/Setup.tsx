@@ -2,12 +2,12 @@ import React, { useState, useEffect, FormEvent, useRef } from 'react';
 import { Tournament, TournamentMode, Player } from '../types';
 import { tournamentService } from '../lib/tournamentService';
 import { v4 as uuidv4 } from 'uuid';
-import { Trash2, Plus, Play, RotateCcw, CheckCircle2, Clock, UserPlus, AlertTriangle, Upload, Camera } from 'lucide-react';
+import { Trash2, Plus, Play, RotateCcw, CheckCircle2, Clock, UserPlus, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface SetupProps {
   tournament: Tournament | null;
-  onRefresh?: () => void;
+  onRefresh?: (silent?: boolean, newData?: Tournament) => void;
 }
 
 export default function Setup({ tournament, onRefresh }: SetupProps) {
@@ -66,28 +66,11 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
   const [regEmail, setRegEmail] = useState('');
   const [regDupr, setRegDupr] = useState('');
   const [regJersey, setRegJersey] = useState('');
-  const [regAvatar, setRegAvatar] = useState<File | null>(null);
-  const [regAvatarPreview, setRegAvatarPreview] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setRegAvatar(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setRegAvatarPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   const handleRegister = async (e: FormEvent) => {
     e.preventDefault();
     if (!regName || !regJersey) return;
     
-    setIsUploading(true);
     const playerId = uuidv4();
 
     try {
@@ -110,12 +93,8 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
       setRegEmail('');
       setRegDupr('');
       setRegJersey('');
-      setRegAvatar(null);
-      setRegAvatarPreview(null);
     } catch (err) {
       console.error('Failed to register player:', err);
-    } finally {
-      setIsUploading(false);
     }
   };
 
@@ -290,36 +269,6 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
               </div>
               <form onSubmit={handleRegister} className="space-y-8">
                 <div className="flex flex-col sm:flex-row gap-8 items-start">
-                  {/* Avatar Upload */}
-                  <div className="flex flex-col items-center gap-3">
-                    <div 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-32 h-32 rounded-2xl border-2 border-dashed border-outline-variant hover:border-primary transition-all cursor-pointer overflow-hidden flex items-center justify-center bg-surface-container-lowest group relative"
-                    >
-                      {regAvatarPreview ? (
-                        <>
-                          <img src={regAvatarPreview} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <Camera className="w-6 h-6 text-white" />
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center gap-2 text-on-surface-variant group-hover:text-primary transition-colors">
-                          <Upload className="w-6 h-6" />
-                          <span className="text-[8px] font-black uppercase tracking-widest">UPLOAD AVATAR</span>
-                        </div>
-                      )}
-                    </div>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef}
-                      onChange={handleAvatarChange}
-                      accept="image/*"
-                      className="hidden"
-                    />
-                    <div className="text-[8px] font-mono font-bold uppercase text-on-surface-variant opacity-50">MAX 2MB // JPG, PNG</div>
-                  </div>
-
                   <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-8">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">PLAYER LEGAL NAME</label>
@@ -386,10 +335,9 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
                     </button>
                     <button 
                       type="submit"
-                      disabled={isUploading}
                       className="flex-1 sm:flex-none bg-primary text-on-primary px-10 py-4 rounded-lg font-black uppercase tracking-widest text-sm hover:bg-primary-dim shadow-lg transition-colors disabled:opacity-50"
                     >
-                      {isUploading ? 'UPLOADING...' : 'REGISTER PLAYER'}
+                      REGISTER PLAYER
                     </button>
                   </div>
                 </div>
@@ -547,13 +495,9 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
                       <Trash2 className="w-3 h-3" />
                     </button>
                     <div className="flex gap-4 items-center mb-2">
-                      {p.avatarUrl ? (
-                        <img src={p.avatarUrl} alt={p.name} className="w-10 h-10 rounded-lg object-cover border border-outline-variant" referrerPolicy="no-referrer" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center border border-outline-variant">
-                          <UserPlus className="w-4 h-4 text-on-surface-variant opacity-30" />
-                        </div>
-                      )}
+                      <div className="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center border border-outline-variant">
+                        <UserPlus className="w-4 h-4 text-on-surface-variant opacity-30" />
+                      </div>
                       <div className="flex-1">
                         <div className="text-sm font-black uppercase tracking-tight text-on-surface">{p.name}</div>
                         <div className="text-[10px] font-mono text-on-surface-variant opacity-60">#{p.jerseyNumber}</div>

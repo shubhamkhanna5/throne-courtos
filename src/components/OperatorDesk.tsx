@@ -1,4 +1,4 @@
-import { generateScorecardsPDF } from '../lib/pdf';
+import { generateScorecardsPDF, generatePDF } from '../lib/pdf';
 import { useState, useEffect, useRef } from 'react';
 import { Tournament, Pod, Match, Round, Player } from '../types';
 import { tournamentService } from '../lib/tournamentService';
@@ -9,7 +9,7 @@ import autoTable from 'jspdf-autotable';
 
 interface OperatorDeskProps {
   tournament: Tournament;
-  onRefresh?: () => void;
+  onRefresh?: (silent?: boolean, newData?: Tournament) => void;
 }
 
 export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProps) {
@@ -218,9 +218,9 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
     setView('PODS');
 
     try {
-      await tournamentService.submitScore(selectedPod.id, matches, tournament.id);
-      // Success! Realtime will handle the rest.
-      onRefresh?.();
+      const updated = await tournamentService.submitScore(selectedPod.id, matches, tournament.id);
+      // Success! Realtime will handle the rest, but we update immediately for speed
+      onRefresh?.(true, updated);
     } catch (err) {
       console.error('Submit score error:', err);
       // Revert on error
@@ -259,9 +259,9 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
     setView('PODS');
 
     try {
-      await tournamentService.submitPlayoffScore(matchId, s1, s2);
+      const updated = await tournamentService.submitPlayoffScore(matchId, s1, s2);
       // Success!
-      onRefresh?.();
+      onRefresh?.(true, updated);
     } catch (err) {
       console.error('Submit playoff score error:', err);
       // Revert on error
@@ -279,11 +279,22 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
   const handleAdvanceRound = async () => {
     if (!tournament || isAdvancing) return;
     
+    let message = '';
+    if (tournament.status === 'SEEDING') message = 'Advance to Round 2 (Ladder)?';
+    else if (tournament.status === 'LADDER') {
+      if (tournament.currentRoundIndex < 3) message = `Advance to Round ${tournament.currentRoundIndex + 2}?`;
+      else message = 'Advance to Playoff Draft?';
+    } else if (tournament.status === 'PLAYOFFS') {
+      message = 'Generate Playoff Bracket?';
+    }
+
     const allPodsLocked = !currentRound || currentRound.pods?.every(p => p.status === 'LOCKED');
     if (!allPodsLocked && !showAdvanceConfirm) {
       setShowAdvanceConfirm(true);
       return;
     }
+
+    if (!window.confirm(message || 'Advance to the next stage?')) return;
 
     setIsAdvancing(true);
     try {
@@ -292,8 +303,25 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
       onRefresh?.();
     } catch (err) {
       console.error('Advance round error:', err);
+      alert('Failed to advance round. Please try again.');
     } finally {
       setIsAdvancing(false);
+    }
+  };
+
+  const handleResetTournament = async () => {
+    if (!tournament || isLoading) return;
+    if (!window.confirm('WARNING: This will delete ALL scores and reset the tournament to SETUP. Are you sure?')) return;
+
+    setIsLoading(true);
+    try {
+      await tournamentService.resetTournament(tournament.id);
+      onRefresh?.();
+    } catch (err) {
+      console.error('Reset tournament error:', err);
+      alert('Failed to reset tournament.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -489,18 +517,18 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
 
   const handleFinishTournament = async () => {
     if (!tournament || isLoading) return;
+    if (!window.confirm('Finalize tournament and lock all scores? This will generate the final report.')) return;
     
     setIsLoading(true);
     try {
       console.log('[OperatorDesk] Finishing tournament:', tournament.id);
       await tournamentService.finishTournament(tournament.id);
+      generatePDF(tournament);
       setShowFinishConfirm(false);
       onRefresh?.();
-      // Realtime will update the status
     } catch (err) {
       console.error('Finish tournament error:', err);
-      // Fallback to simpler error handling if alert is blocked
-      setIsLoading(false);
+      alert('Failed to finish tournament.');
     } finally {
       setIsLoading(false);
     }
@@ -738,18 +766,32 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
             
             {/* Round Actions */}
             {!isPlayoffs && currentRound && (
-              <button
-                onClick={downloadRoundAssignments}
-                className="p-6 rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-outline-variant bg-surface-container-lowest hover:bg-surface-container-low transition-all space-y-4"
-              >
-                <div className="w-12 h-12 rounded-full bg-tertiary/10 flex items-center justify-center">
-                  <Download className="w-6 h-6 text-tertiary" />
-                </div>
-                <div className="text-center">
-                  <div className="text-[10px] uppercase font-black tracking-widest text-on-surface-variant mb-1">Assignments</div>
-                  <div className="text-xl editorial-title font-black">Get PDF</div>
-                </div>
-              </button>
+              <>
+                <button
+                  onClick={downloadRoundAssignments}
+                  className="p-6 rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-outline-variant bg-surface-container-lowest hover:bg-surface-container-low transition-all space-y-4"
+                >
+                  <div className="w-12 h-12 rounded-full bg-tertiary/10 flex items-center justify-center">
+                    <Download className="w-6 h-6 text-tertiary" />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[10px] uppercase font-black tracking-widest text-on-surface-variant mb-1">Assignments</div>
+                    <div className="text-xl editorial-title font-black">Get PDF</div>
+                  </div>
+                </button>
+                <button
+                  onClick={handleResetTournament}
+                  className="p-6 rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-error/30 bg-error/5 hover:bg-error/10 transition-all space-y-4"
+                >
+                  <div className="w-12 h-12 rounded-full bg-error/10 flex items-center justify-center">
+                    <RotateCcw className="w-6 h-6 text-error" />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[10px] uppercase font-black tracking-widest text-error/70 mb-1">Danger Zone</div>
+                    <div className="text-xl editorial-title font-black text-error">Reset All</div>
+                  </div>
+                </button>
+              </>
             )}
           </motion.div>
         ) : (
@@ -787,16 +829,8 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
                                 <div className="text-[8px] sm:text-[10px] font-mono text-on-surface-variant opacity-60 mt-0.5">#{p1?.jerseyNumber} + #{p2?.jerseyNumber}</div>
                               </div>
                               <div className="flex -space-x-3 sm:-space-x-4">
-                                {p1?.avatarUrl ? (
-                                  <img src={p1.avatarUrl} alt={p1.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
-                                ) : (
-                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p1?.jerseyNumber}</div>
-                                )}
-                                {p2?.avatarUrl ? (
-                                  <img src={p2.avatarUrl} alt={p2.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
-                                ) : (
-                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p2?.jerseyNumber}</div>
-                                )}
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p1?.jerseyNumber}</div>
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p2?.jerseyNumber}</div>
                               </div>
                             </div>
 
@@ -832,16 +866,8 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
 
                             <div className="flex-1 flex items-center justify-start gap-3 sm:gap-4 w-full">
                               <div className="flex -space-x-3 sm:-space-x-4">
-                                {p3?.avatarUrl ? (
-                                  <img src={p3.avatarUrl} alt={p3.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
-                                ) : (
-                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p3?.jerseyNumber}</div>
-                                )}
-                                {p4?.avatarUrl ? (
-                                  <img src={p4.avatarUrl} alt={p4.name} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-surface object-cover shadow-sm" referrerPolicy="no-referrer" />
-                                ) : (
-                                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p4?.jerseyNumber}</div>
-                                )}
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p3?.jerseyNumber}</div>
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-surface-container-high border-2 border-surface flex items-center justify-center text-[8px] sm:text-[10px] font-black text-on-surface-variant">#{p4?.jerseyNumber}</div>
                               </div>
                               <div className="text-left">
                                 <div className="text-sm sm:text-lg font-black uppercase text-on-surface leading-tight">{p3?.name}</div>
