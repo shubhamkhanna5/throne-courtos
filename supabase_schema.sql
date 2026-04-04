@@ -19,6 +19,16 @@ ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'MIN
 ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'SETUP';
 ALTER TABLE tournaments ADD COLUMN IF NOT EXISTS current_round_index INTEGER DEFAULT -1;
 
+ALTER TABLE players ADD COLUMN IF NOT EXISTS contact TEXT;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS dupr_id TEXT;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS jersey_number TEXT;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS rank INTEGER DEFAULT 0;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 0;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS point_diff INTEGER DEFAULT 0;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS points_scored INTEGER DEFAULT 0;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS pod_wins INTEGER DEFAULT 0;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS last_rank INTEGER DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS players (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
@@ -44,6 +54,11 @@ CREATE TABLE IF NOT EXISTS rounds (
   status TEXT NOT NULL DEFAULT 'PENDING' -- PENDING, LOCKED
 );
 
+-- Migration for rounds
+ALTER TABLE rounds ADD COLUMN IF NOT EXISTS number INTEGER;
+ALTER TABLE rounds ADD COLUMN IF NOT EXISTS type TEXT;
+ALTER TABLE rounds ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'PENDING';
+
 CREATE TABLE IF NOT EXISTS pods (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   round_id UUID REFERENCES rounds(id) ON DELETE CASCADE,
@@ -55,6 +70,9 @@ CREATE TABLE IF NOT EXISTS pods (
 
 -- Migration for pods
 ALTER TABLE pods ADD COLUMN IF NOT EXISTS tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE;
+ALTER TABLE pods ADD COLUMN IF NOT EXISTS court_name TEXT;
+ALTER TABLE pods ADD COLUMN IF NOT EXISTS pod_name TEXT;
+ALTER TABLE pods ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'PENDING';
 
 CREATE TABLE IF NOT EXISTS pod_players (
   pod_id UUID REFERENCES pods(id) ON DELETE CASCADE,
@@ -62,6 +80,9 @@ CREATE TABLE IF NOT EXISTS pod_players (
   pod_rank INTEGER,
   PRIMARY KEY (pod_id, player_id)
 );
+
+-- Migration for pod_players
+ALTER TABLE pod_players ADD COLUMN IF NOT EXISTS pod_rank INTEGER;
 
 CREATE TABLE IF NOT EXISTS matches (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -78,6 +99,13 @@ CREATE TABLE IF NOT EXISTS matches (
 
 -- Migration for matches
 ALTER TABLE matches ADD COLUMN IF NOT EXISTS tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE;
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS p1_id UUID REFERENCES players(id);
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS p2_id UUID REFERENCES players(id);
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS p3_id UUID REFERENCES players(id);
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS p4_id UUID REFERENCES players(id);
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS score1 INTEGER DEFAULT 0;
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS score2 INTEGER DEFAULT 0;
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'PENDING';
 
 CREATE TABLE IF NOT EXISTS playoff_teams (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -86,6 +114,11 @@ CREATE TABLE IF NOT EXISTS playoff_teams (
   partner_id UUID REFERENCES players(id),
   name TEXT NOT NULL
 );
+
+-- Migration for playoff_teams
+ALTER TABLE playoff_teams ADD COLUMN IF NOT EXISTS captain_id UUID REFERENCES players(id);
+ALTER TABLE playoff_teams ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES players(id);
+ALTER TABLE playoff_teams ADD COLUMN IF NOT EXISTS name TEXT;
 
 CREATE TABLE IF NOT EXISTS playoff_matches (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -98,52 +131,55 @@ CREATE TABLE IF NOT EXISTS playoff_matches (
   stage TEXT NOT NULL -- SEMIS, FINALS
 );
 
+-- Migration for playoff_matches
+ALTER TABLE playoff_matches ADD COLUMN IF NOT EXISTS team1_id UUID REFERENCES playoff_teams(id);
+ALTER TABLE playoff_matches ADD COLUMN IF NOT EXISTS team2_id UUID REFERENCES playoff_teams(id);
+ALTER TABLE playoff_matches ADD COLUMN IF NOT EXISTS score1 INTEGER DEFAULT 0;
+ALTER TABLE playoff_matches ADD COLUMN IF NOT EXISTS score2 INTEGER DEFAULT 0;
+ALTER TABLE playoff_matches ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'PENDING';
+ALTER TABLE playoff_matches ADD COLUMN IF NOT EXISTS stage TEXT;
+
 -- 2. HELPER FUNCTIONS
 DROP FUNCTION IF EXISTS generate_round_pods(UUID, UUID);
 CREATE OR REPLACE FUNCTION generate_round_pods(p_tournament_id UUID, p_round_id UUID)
 RETURNS VOID AS $$
 DECLARE
   v_mode TEXT;
-  v_num_courts INTEGER;
+  v_num_pods INTEGER;
   v_court_names TEXT[] := ARRAY['Throne', 'Challenger', 'Contender', 'Survival'];
   v_player_ids UUID[];
   v_pod_id UUID;
   v_pod_players UUID[];
+  v_court_index INTEGER;
+  v_pod_name TEXT;
 BEGIN
   SELECT mode INTO v_mode FROM tournaments WHERE id = p_tournament_id;
-  v_num_courts := CASE WHEN v_mode = 'MAJOR' THEN 4 WHEN v_mode = 'CORE' THEN 3 ELSE 2 END;
+  
+  v_num_pods := CASE 
+    WHEN v_mode = 'MAJOR' THEN 8 
+    WHEN v_mode = 'CORE' THEN 6 
+    WHEN v_mode = 'MINI' THEN 4 
+    WHEN v_mode = 'MICRO' THEN 3 
+    ELSE 4 
+  END;
   
   -- Get players sorted by rank
   SELECT array_agg(id ORDER BY rank ASC) INTO v_player_ids FROM players WHERE tournament_id = p_tournament_id;
   
-  FOR i IN 0..(v_num_courts - 1) LOOP
-    -- Pod A
+  FOR i IN 0..(v_num_pods - 1) LOOP
+    v_court_index := (i / 2) + 1;
+    v_pod_name := CASE WHEN i % 2 = 0 THEN 'A' ELSE 'B' END;
+    
     INSERT INTO pods (round_id, tournament_id, court_name, pod_name)
-    VALUES (p_round_id, p_tournament_id, v_court_names[i+1], 'A')
+    VALUES (p_round_id, p_tournament_id, v_court_names[v_court_index], v_pod_name)
     RETURNING id INTO v_pod_id;
     
-    v_pod_players := v_player_ids[(i*8 + 1):(i*8 + 4)];
+    v_pod_players := v_player_ids[(i*4 + 1):(i*4 + 4)];
     
     INSERT INTO pod_players (pod_id, player_id)
     SELECT v_pod_id, unnest(v_pod_players);
     
-    -- Matches for Pod A (Americano: 1+2 vs 3+4, 1+3 vs 2+4, 1+4 vs 2+3)
-    INSERT INTO matches (pod_id, tournament_id, p1_id, p2_id, p3_id, p4_id) VALUES
-    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[2], v_pod_players[3], v_pod_players[4]),
-    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[3], v_pod_players[2], v_pod_players[4]),
-    (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[4], v_pod_players[2], v_pod_players[3]);
-
-    -- Pod B
-    INSERT INTO pods (round_id, tournament_id, court_name, pod_name)
-    VALUES (p_round_id, p_tournament_id, v_court_names[i+1], 'B')
-    RETURNING id INTO v_pod_id;
-    
-    v_pod_players := v_player_ids[(i*8 + 5):(i*8 + 8)];
-    
-    INSERT INTO pod_players (pod_id, player_id)
-    SELECT v_pod_id, unnest(v_pod_players);
-    
-    -- Matches for Pod B
+    -- Matches for Pod (Americano: 1+2 vs 3+4, 1+3 vs 2+4, 1+4 vs 2+3)
     INSERT INTO matches (pod_id, tournament_id, p1_id, p2_id, p3_id, p4_id) VALUES
     (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[2], v_pod_players[3], v_pod_players[4]),
     (v_pod_id, p_tournament_id, v_pod_players[1], v_pod_players[3], v_pod_players[2], v_pod_players[4]),
@@ -295,7 +331,16 @@ BEGIN
         p.id as pod_id,
         p.court_name,
         p.pod_name,
-        row_number() OVER (ORDER BY p.court_name, p.pod_name) as pod_index
+        row_number() OVER (ORDER BY 
+          CASE p.court_name
+            WHEN 'Throne' THEN 1
+            WHEN 'Challenger' THEN 2
+            WHEN 'Contender' THEN 3
+            WHEN 'Survival' THEN 4
+            ELSE 5
+          END, 
+          p.pod_name
+        ) as pod_index
       FROM pods p
       WHERE p.round_id = v_round_id
     ),
@@ -472,19 +517,120 @@ $$ LANGUAGE plpgsql;
 -- 10. RPC: RUN MIGRATIONS
 DROP FUNCTION IF EXISTS run_migrations();
 CREATE OR REPLACE FUNCTION run_migrations()
-RETURNS VOID AS $$
+RETURNS VOID 
+SECURITY DEFINER
+AS $$
 BEGIN
-  -- Ensure all columns exist for existing tables
+  -- Tournaments
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tournaments' AND column_name='mode') THEN
     ALTER TABLE tournaments ADD COLUMN mode TEXT NOT NULL DEFAULT 'MINI';
   END IF;
-  
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tournaments' AND column_name='status') THEN
     ALTER TABLE tournaments ADD COLUMN status TEXT NOT NULL DEFAULT 'SETUP';
   END IF;
-  
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tournaments' AND column_name='current_round_index') THEN
     ALTER TABLE tournaments ADD COLUMN current_round_index INTEGER DEFAULT -1;
+  END IF;
+
+  -- Players
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='contact') THEN
+    ALTER TABLE players ADD COLUMN contact TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='dupr_id') THEN
+    ALTER TABLE players ADD COLUMN dupr_id TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='jersey_number') THEN
+    ALTER TABLE players ADD COLUMN jersey_number TEXT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='rank') THEN
+    ALTER TABLE players ADD COLUMN rank INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='points') THEN
+    ALTER TABLE players ADD COLUMN points INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='point_diff') THEN
+    ALTER TABLE players ADD COLUMN point_diff INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='points_scored') THEN
+    ALTER TABLE players ADD COLUMN points_scored INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='pod_wins') THEN
+    ALTER TABLE players ADD COLUMN pod_wins INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='players' AND column_name='last_rank') THEN
+    ALTER TABLE players ADD COLUMN last_rank INTEGER DEFAULT 0;
+  END IF;
+
+  -- Rounds
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='rounds' AND column_name='status') THEN
+    ALTER TABLE rounds ADD COLUMN status TEXT NOT NULL DEFAULT 'PENDING';
+  END IF;
+
+  -- Pods
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pods' AND column_name='tournament_id') THEN
+    ALTER TABLE pods ADD COLUMN tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pods' AND column_name='status') THEN
+    ALTER TABLE pods ADD COLUMN status TEXT NOT NULL DEFAULT 'PENDING';
+  END IF;
+
+  -- Pod Players
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='pod_players' AND column_name='pod_rank') THEN
+    ALTER TABLE pod_players ADD COLUMN pod_rank INTEGER;
+  END IF;
+
+  -- Matches
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='tournament_id') THEN
+    ALTER TABLE matches ADD COLUMN tournament_id UUID REFERENCES tournaments(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='p1_id') THEN
+    ALTER TABLE matches ADD COLUMN p1_id UUID REFERENCES players(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='p2_id') THEN
+    ALTER TABLE matches ADD COLUMN p2_id UUID REFERENCES players(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='p3_id') THEN
+    ALTER TABLE matches ADD COLUMN p3_id UUID REFERENCES players(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='p4_id') THEN
+    ALTER TABLE matches ADD COLUMN p4_id UUID REFERENCES players(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='score1') THEN
+    ALTER TABLE matches ADD COLUMN score1 INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='score2') THEN
+    ALTER TABLE matches ADD COLUMN score2 INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='matches' AND column_name='status') THEN
+    ALTER TABLE matches ADD COLUMN status TEXT NOT NULL DEFAULT 'PENDING';
+  END IF;
+
+  -- Playoff Teams
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_teams' AND column_name='captain_id') THEN
+    ALTER TABLE playoff_teams ADD COLUMN captain_id UUID REFERENCES players(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_teams' AND column_name='partner_id') THEN
+    ALTER TABLE playoff_teams ADD COLUMN partner_id UUID REFERENCES players(id);
+  END IF;
+
+  -- Playoff Matches
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_matches' AND column_name='team1_id') THEN
+    ALTER TABLE playoff_matches ADD COLUMN team1_id UUID REFERENCES playoff_teams(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_matches' AND column_name='team2_id') THEN
+    ALTER TABLE playoff_matches ADD COLUMN team2_id UUID REFERENCES playoff_teams(id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_matches' AND column_name='score1') THEN
+    ALTER TABLE playoff_matches ADD COLUMN score1 INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_matches' AND column_name='score2') THEN
+    ALTER TABLE playoff_matches ADD COLUMN score2 INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_matches' AND column_name='status') THEN
+    ALTER TABLE playoff_matches ADD COLUMN status TEXT NOT NULL DEFAULT 'PENDING';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='playoff_matches' AND column_name='stage') THEN
+    ALTER TABLE playoff_matches ADD COLUMN stage TEXT;
   END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -541,7 +687,19 @@ BEGIN
                 'status', m.status
               )) FROM matches m WHERE m.pod_id = pd.id
             ), '[]'::jsonb)
-          )) FROM pods pd WHERE pd.round_id = r.id
+          )) FROM (
+            SELECT * FROM pods 
+            WHERE round_id = r.id
+            ORDER BY 
+              CASE court_name
+                WHEN 'Throne' THEN 1
+                WHEN 'Challenger' THEN 2
+                WHEN 'Contender' THEN 3
+                WHEN 'Survival' THEN 4
+                ELSE 5
+              END,
+              pod_name
+          ) pd
         ), '[]'::jsonb)
       )) FROM rounds r WHERE r.tournament_id = t.id
     ), '[]'::jsonb),

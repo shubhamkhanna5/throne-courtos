@@ -9,7 +9,7 @@ import HypeBoard from './components/HypeBoard';
 import PlayerPage from './components/PlayerPage';
 import PlayoffDraft from './components/PlayoffDraft';
 import Home from './components/Home';
-import { Trophy, LayoutDashboard, Users, Search, Settings, Swords, Lock, User, ShieldCheck, LogOut, AlertCircle, RefreshCw } from 'lucide-react';
+import { Trophy, LayoutDashboard, Users, Search, Settings, Swords, Lock, User, ShieldCheck, LogOut, AlertCircle, RefreshCw, AlertTriangle, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // --- Error Boundary ---
@@ -72,6 +72,7 @@ function AppContent() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [dbError, setDbError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isAuth, setIsAuth] = useState(() => {
     return localStorage.getItem('courtos_is_auth') === 'true';
@@ -101,6 +102,7 @@ function AppContent() {
     }
     
     try {
+      setDbError(null);
       isFetchingRef.current = true;
       console.log(`[App] Starting fetchState (silent: ${silent})...`);
       if (!silent) setIsLoading(true);
@@ -146,6 +148,13 @@ function AppContent() {
 
       if (error) {
         console.error('[App] RPC get_tournament_state failed:', error.message);
+        if (error.message?.includes('Invalid API key')) {
+          setDbError('Supabase authentication failed. Please check your VITE_SUPABASE_ANON_KEY and VITE_SUPABASE_URL in the Settings menu.');
+        } else if (error.message?.includes('column')) {
+          setDbError(`Database Schema Mismatch: ${error.message}. Please run the SQL migrations in Supabase.`);
+        } else {
+          setDbError(error.message);
+        }
         // Fallback to existing service if RPC fails
         const fallbackData = await tournamentService.getTournament(currentId || undefined);
         if (fallbackData) {
@@ -166,6 +175,21 @@ function AppContent() {
       isFetchingRef.current = false;
       setIsLoading(false);
       setIsSyncing(false);
+    }
+  };
+
+  const runMigrations = async () => {
+    try {
+      setIsLoading(true);
+      const { error } = await supabase.rpc('run_migrations');
+      if (error) throw error;
+      alert('Migrations completed successfully! Refreshing app...');
+      window.location.reload();
+    } catch (err: any) {
+      console.error('Migration failed:', err);
+      alert('Migration failed: ' + (err.message || err));
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -396,6 +420,22 @@ function AppContent() {
 
       {/* Main Content */}
       <main className={`${(userType && location.pathname !== '/') ? 'pt-4 pb-24 md:pt-20 md:pb-8 px-4 max-w-7xl mx-auto' : ''}`}>
+        {dbError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+            <div className="flex items-center gap-3 text-red-700">
+              <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+              <p className="text-sm font-bold uppercase tracking-tight">{dbError}</p>
+            </div>
+            <button
+              onClick={runMigrations}
+              disabled={isLoading}
+              className="px-4 py-2 bg-red-600 text-white text-xs font-black uppercase tracking-widest rounded hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              <RotateCcw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+              Run Database Migrations
+            </button>
+          </div>
+        )}
         <ErrorBoundary>
           <AnimatePresence mode="wait">
             <motion.div

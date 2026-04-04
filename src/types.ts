@@ -1,8 +1,9 @@
-export type TournamentMode = 'MINI' | 'CORE' | 'MAJOR';
+export type TournamentMode = 'MICRO' | 'MINI' | 'CORE' | 'MAJOR';
 
 export interface Player {
   id: string;
   name: string;
+  contact: string;
   phone: string;
   email: string;
   duprId: string;

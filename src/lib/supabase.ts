@@ -14,7 +14,24 @@ if (isValid(supabaseUrl) && isValid(supabaseAnonKey)) {
     // Diagnostic log (masked)
     console.log('Initializing Supabase client with URL:', supabaseUrl.substring(0, 10) + '...');
     console.log('Supabase Anon Key length:', supabaseAnonKey.length);
-    console.log('Supabase Anon Key prefix:', supabaseAnonKey.substring(0, 10) + '...');
+    
+    // Check if key is a JWT and extract project ref
+    try {
+      const parts = supabaseAnonKey.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        console.log('Supabase Key Role:', payload.role);
+        console.log('Supabase Key Project Ref:', payload.ref);
+        
+        const urlRef = supabaseUrl.match(/https:\/\/(.*?)\.supabase\.co/)?.[1];
+        if (urlRef && payload.ref !== urlRef) {
+          console.error('CRITICAL: Supabase URL and Key Project Ref mismatch!', { urlRef, keyRef: payload.ref });
+        }
+      }
+    } catch (e) {
+      console.warn('Could not parse Supabase key as JWT');
+    }
+
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey);
     console.log('Supabase client initialized successfully');
   } catch (err) {

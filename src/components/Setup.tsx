@@ -2,7 +2,8 @@ import React, { useState, useEffect, FormEvent, useRef } from 'react';
 import { Tournament, TournamentMode, Player } from '../types';
 import { tournamentService } from '../lib/tournamentService';
 import { v4 as uuidv4 } from 'uuid';
-import { Trash2, Plus, Play, RotateCcw, CheckCircle2, Clock, UserPlus, AlertTriangle } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { Trash2, Plus, Play, RotateCcw, CheckCircle2, Clock, UserPlus, AlertTriangle, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface SetupProps {
@@ -77,6 +78,7 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
       const newPlayer: Partial<Player> = {
         id: playerId,
         name: regName,
+        contact: regPhone || regEmail || '',
         phone: regPhone,
         email: regEmail,
         duprId: regDupr,
@@ -103,7 +105,7 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
   };
 
   const handleSetup = async () => {
-    const requiredCount = mode === 'MAJOR' ? 32 : mode === 'CORE' ? 24 : 16;
+    const requiredCount = mode === 'MAJOR' ? 32 : mode === 'CORE' ? 24 : mode === 'MINI' ? 16 : 12;
     if (players.length < requiredCount) {
       alert(`Mode ${mode} requires at least ${requiredCount} players. Current: ${players.length}`);
       return;
@@ -168,7 +170,7 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
   };
 
   const bulkAdd = () => {
-    const count = mode === 'MAJOR' ? 32 : mode === 'CORE' ? 24 : 16;
+    const count = mode === 'MAJOR' ? 32 : mode === 'CORE' ? 24 : mode === 'MINI' ? 16 : 12;
     const names = [
       'James Wilson', 'Sarah Miller', 'Robert Taylor', 'Linda Anderson',
       'Michael Thomas', 'Barbara Jackson', 'William White', 'Elizabeth Harris',
@@ -183,6 +185,7 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
     const newPlayers: Partial<Player>[] = Array.from({ length: count }).map((_, i) => ({
       id: uuidv4(),
       name: names[i] || `Player ${i + 1}`,
+      contact: `555-01${(i + 1).toString().padStart(2, '0')}`,
       phone: `555-01${(i + 1).toString().padStart(2, '0')}`,
       email: `${(names[i] || `p${i+1}`).toLowerCase().replace(/\s+/g, '.')}@example.com`,
       duprId: (3.5 + Math.random() * 2).toFixed(2),
@@ -195,7 +198,7 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
     setPlayers(newPlayers);
   };
 
-  const requiredCount = mode === 'MAJOR' ? 32 : mode === 'CORE' ? 24 : 16;
+  const requiredCount = mode === 'MAJOR' ? 32 : mode === 'CORE' ? 24 : mode === 'MINI' ? 16 : 12;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -208,9 +211,26 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
                 <h1 className="text-4xl sm:text-5xl editorial-title font-black tracking-tighter uppercase text-primary">Tournament Configuration</h1>
                 <p className="text-[10px] font-mono font-bold uppercase tracking-[0.3em] text-on-surface-variant">OPERATIONAL MODULE // CORE CONFIGURATION & PLAYER INGRESS</p>
               </div>
-              <div className="bg-surface-container-low px-4 py-2 rounded border border-outline-variant text-right self-start sm:self-auto">
-                <div className="text-[8px] font-bold uppercase text-on-surface-variant">SYSTEM STATUS</div>
-                <div className="text-xs font-black uppercase tracking-widest text-on-surface">READY FOR INGRESS</div>
+              <div className="flex flex-col gap-2 text-right self-start sm:self-auto">
+                <div className="bg-surface-container-low px-4 py-2 rounded border border-outline-variant">
+                  <div className="text-[8px] font-bold uppercase text-on-surface-variant">SYSTEM STATUS</div>
+                  <div className="text-xs font-black uppercase tracking-widest text-on-surface">READY FOR INGRESS</div>
+                </div>
+                <div className={`flex items-center justify-end gap-2 px-3 py-1 rounded border text-[8px] font-black uppercase tracking-widest ${
+                  supabase ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
+                }`}>
+                  {supabase ? (
+                    <>
+                      <ShieldCheck className="w-3 h-3" />
+                      SUPABASE CONNECTED
+                    </>
+                  ) : (
+                    <>
+                      <ShieldAlert className="w-3 h-3" />
+                      SUPABASE DISCONNECTED
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -237,12 +257,13 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
                 <span className="text-xs font-mono font-bold text-on-surface-variant opacity-50">01.</span>
                 <h2 className="text-xs font-black uppercase tracking-widest text-on-surface">CONFIGURATION MATRIX</h2>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
                   { id: 'MAJOR', label: 'Major', desc: '64+ SLOTS / DOUBLE ELIM / PROFESSIONAL', count: 32 },
                   { id: 'CORE', label: 'Core', desc: '32 SLOTS / ROUND ROBIN / STANDARD', count: 24 },
                   { id: 'MINI', label: 'Mini', desc: '16 SLOTS / SINGLE ELIM / FLASH', count: 16 },
-                ].map((m) => (
+                  { id: 'MICRO', label: 'Micro', desc: '12 SLOTS / FAST TRACK / LIGHT', count: 12 },
+                ].map((m, idx) => (
                   <button
                     key={m.id}
                     onClick={() => setMode(m.id as TournamentMode)}
@@ -252,7 +273,7 @@ export default function Setup({ tournament, onRefresh }: SetupProps) {
                         : 'bg-surface-container-lowest border-outline-variant hover:border-outline text-on-surface'
                     }`}
                   >
-                    <div className={`text-[10px] font-mono font-bold uppercase mb-1 ${mode === m.id ? 'text-on-primary/60' : 'text-on-surface-variant'}`}>MODE {m.id === 'MAJOR' ? '01' : m.id === 'CORE' ? '02' : '03'}</div>
+                    <div className={`text-[10px] font-mono font-bold uppercase mb-1 ${mode === m.id ? 'text-on-primary/60' : 'text-on-surface-variant'}`}>MODE {(idx + 1).toString().padStart(2, '0')}</div>
                     <div className="text-3xl editorial-title font-black mb-4">{m.label}</div>
                     <div className={`text-[8px] font-bold leading-relaxed ${mode === m.id ? 'text-on-primary/70' : 'text-on-surface-variant'}`}>{m.desc}</div>
                     {mode === m.id && <CheckCircle2 className="absolute top-4 right-4 w-4 h-4 text-on-primary" />}
