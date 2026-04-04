@@ -342,7 +342,7 @@ function AppContent() {
     { id: 'HYPE', path: '/scoreboard', icon: LayoutDashboard, label: 'Hype Board' },
     { id: 'OPERATOR', path: '/operator', icon: Trophy, label: 'Operator', protected: true },
     { id: 'PLAYERS', path: '/players', icon: Search, label: 'Players' },
-    { id: 'PLAYOFFS', path: '/playoffs', icon: Swords, label: 'Playoffs', protected: true, hidden: tournament?.status !== 'PLAYOFFS' },
+    { id: 'PLAYOFFS', path: '/playoffs', icon: Swords, label: 'Playoffs', protected: true, hidden: !['TEAM_SELECTION', 'PLAYOFFS'].includes(tournament?.status || '') },
     { id: 'SETUP', path: '/admin', icon: Settings, label: 'Admin', protected: true },
   ];
 

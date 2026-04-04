@@ -138,18 +138,32 @@ export const tournamentService = {
     return data;
   },
 
-  async draftPartner(tournamentId: string, captainId: string, partnerId: string) {
+  async createPlayoffTeam(tournamentId: string, captainId: string, partnerId: string) {
     if (!supabase) throw new Error('Supabase client not initialized');
     
-    const { data, error } = await supabase.rpc('draft_partner', {
+    const { data, error } = await supabase.rpc('create_playoff_team', {
       p_tournament_id: tournamentId,
       p_captain_id: captainId,
       p_partner_id: partnerId
     });
 
     if (error) {
-      console.error('[TournamentService] draftPartner error:', error);
+      console.error('[TournamentService] createPlayoffTeam error:', error);
       throw new Error(error.message || 'Drafting failed');
+    }
+    return data;
+  },
+
+  async finalizePlayoffs(tournamentId: string) {
+    if (!supabase) throw new Error('Supabase client not initialized');
+    
+    const { data, error } = await supabase.rpc('finalize_playoffs', {
+      p_tournament_id: tournamentId
+    });
+
+    if (error) {
+      console.error('[TournamentService] finalizePlayoffs error:', error);
+      throw new Error(error.message || 'Finalization failed');
     }
     return data;
   },

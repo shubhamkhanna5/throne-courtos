@@ -14,6 +14,7 @@ export interface Player {
   pointsScored: number;
   podWins: number;
   lastRank?: number;
+  movement?: number;
 }
 
 export interface Match {
@@ -64,7 +65,7 @@ export interface Tournament {
   mode: TournamentMode;
   players: Player[];
   rounds: Round[];
-  status: 'SETUP' | 'SEEDING' | 'LADDER' | 'PLAYOFFS' | 'FINISHED';
+  status: 'SETUP' | 'SEEDING' | 'LADDER' | 'TEAM_SELECTION' | 'PLAYOFFS' | 'FINISHED';
   currentRoundIndex: number;
   playoffTeams: PlayoffTeam[];
   playoffMatches: PlayoffMatch[];

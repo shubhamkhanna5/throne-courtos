@@ -1,4 +1,4 @@
-import { generateScorecardsPDF, generatePDF } from '../lib/pdf';
+import { generateScorecardsPDF, generateTournamentResultsPDF } from '../lib/pdf';
 import { useState, useEffect, useRef } from 'react';
 import { Tournament, Pod, Match, Round, Player } from '../types';
 import { tournamentService } from '../lib/tournamentService';
@@ -13,7 +13,7 @@ interface OperatorDeskProps {
 }
 
 export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProps) {
-  const isPlayoffs = tournament.status === 'PLAYOFFS';
+  const isPlayoffs = tournament.status === 'PLAYOFFS' || tournament.status === 'TEAM_SELECTION';
   const currentRound = (!isPlayoffs && Array.isArray(tournament.rounds) && tournament.rounds.length > tournament.currentRoundIndex) 
     ? tournament.rounds[tournament.currentRoundIndex] 
     : null;
@@ -284,12 +284,14 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
     else if (tournament.status === 'LADDER') {
       if (tournament.currentRoundIndex < 3) message = `Advance to Round ${tournament.currentRoundIndex + 2}?`;
       else message = 'Advance to Playoff Draft?';
+    } else if (tournament.status === 'TEAM_SELECTION') {
+      message = 'Finalize Draft and Start Playoffs?';
     } else if (tournament.status === 'PLAYOFFS') {
       message = 'Generate Playoff Bracket?';
     }
 
     const allPodsLocked = !currentRound || currentRound.pods?.every(p => p.status === 'LOCKED');
-    if (!allPodsLocked && !showAdvanceConfirm) {
+    if (!allPodsLocked && !showAdvanceConfirm && tournament.status !== 'TEAM_SELECTION') {
       setShowAdvanceConfirm(true);
       return;
     }
@@ -298,12 +300,16 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
 
     setIsAdvancing(true);
     try {
-      await tournamentService.advanceRound(tournament.id);
+      if (tournament.status === 'TEAM_SELECTION') {
+        await tournamentService.finalizePlayoffs(tournament.id);
+      } else {
+        await tournamentService.advanceRound(tournament.id);
+      }
       setShowAdvanceConfirm(false);
       onRefresh?.();
     } catch (err) {
       console.error('Advance round error:', err);
-      alert('Failed to advance round. Please try again.');
+      alert(err instanceof Error ? err.message : 'Failed to advance round. Please try again.');
     } finally {
       setIsAdvancing(false);
     }
@@ -385,132 +391,8 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
   };
 
   const downloadResults = () => {
-    const doc = new jsPDF();
-    const tournamentName = tournament.name || 'Tournament Results';
-    
-    // Header
-    doc.setFontSize(20);
-    doc.text(tournamentName, 14, 22);
-    doc.setFontSize(10);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
-    doc.text(`Status: ${tournament.status}`, 14, 35);
-
-    // Player Standings
-    doc.setFontSize(14);
-    doc.text('Final Standings', 14, 45);
-    
-    const sortedPlayers = [...(tournament.players || [])].sort((a, b) => (a.rank || 0) - (b.rank || 0));
-    
-    autoTable(doc, {
-      startY: 50,
-      head: [['Rank', 'Player', 'DUPR', 'Phone', 'Email', 'Jersey', 'Points', 'Diff']],
-      body: sortedPlayers.map(p => [
-        p.rank || '-',
-        p.name,
-        p.duprId || '-',
-        p.phone || '-',
-        p.email || '-',
-        p.jerseyNumber,
-        p.points,
-        p.pointDiff
-      ]),
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255] }
-    });
-
-    let currentY = (doc as any).lastAutoTable.finalY + 10;
-
-    // Playoff Bracket (Prioritize on first page if possible)
-    if (tournament.playoffMatches && tournament.playoffMatches.length > 0) {
-      if (currentY > 200) {
-        doc.addPage();
-        currentY = 20;
-      }
-      doc.setFontSize(14);
-      doc.text('Playoff Bracket', 14, currentY);
-      currentY += 10;
-
-      const semis = tournament.playoffMatches.filter(m => m.stage === 'SEMIS');
-      const finals = tournament.playoffMatches.find(m => m.stage === 'FINALS');
-
-      // Draw simple bracket
-      doc.setFontSize(8);
-      semis.forEach((m, i) => {
-        const t1 = tournament.playoffTeams?.find(t => t.id === m.team1Id)?.name || 'TBD';
-        const t2 = tournament.playoffTeams?.find(t => t.id === m.team2Id)?.name || 'TBD';
-        const y = currentY + (i * 30);
-        
-        doc.rect(14, y, 50, 15);
-        doc.text(`${t1}: ${m.score1}`, 16, y + 6);
-        doc.text(`${t2}: ${m.score2}`, 16, y + 12);
-        
-        // Connector
-        doc.line(64, y + 7.5, 74, y + 7.5);
-        if (i === 0) doc.line(74, y + 7.5, 74, y + 22.5);
-        else doc.line(74, y + 7.5, 74, y - 7.5);
-      });
-
-      if (finals) {
-        const t1 = tournament.playoffTeams?.find(t => t.id === finals.team1Id)?.name || 'TBD';
-        const t2 = tournament.playoffTeams?.find(t => t.id === finals.team2Id)?.name || 'TBD';
-        const y = currentY + 15;
-        doc.rect(74, y, 60, 20);
-        doc.setFontSize(10);
-        doc.text('FINALS', 76, y + 5);
-        doc.setFontSize(8);
-        doc.text(`${t1}: ${finals.score1}`, 76, y + 12);
-        doc.text(`${t2}: ${finals.score2}`, 76, y + 18);
-        
-        if (finals.status === 'LOCKED') {
-          const winner = finals.score1 > finals.score2 ? t1 : t2;
-          doc.setFontSize(12);
-          doc.text(`CHAMPION: ${winner}`, 140, y + 12);
-        }
-      }
-      currentY += 60;
-    }
-
-    // Match History (Move to end/new page)
-    if (currentY > 200) {
-      doc.addPage();
-      currentY = 20;
-    } else {
-      currentY += 10;
-    }
-    
-    doc.setFontSize(14);
-    doc.text('Match History', 14, currentY);
-    currentY += 5;
-
-    const matchData: any[] = [];
-    (tournament.rounds || []).forEach(round => {
-      (round.pods || []).forEach(pod => {
-        (pod.matches || []).forEach(match => {
-          const p1 = (tournament.players || []).find(p => p.id === match.playerIds[0]);
-          const p2 = (tournament.players || []).find(p => p.id === match.playerIds[1]);
-          const p3 = (tournament.players || []).find(p => p.id === match.playerIds[2]);
-          const p4 = (tournament.players || []).find(p => p.id === match.playerIds[3]);
-          
-          matchData.push([
-            `R${round.number}`,
-            pod.courtName,
-            `${p1?.name}/${p2?.name}`,
-            `${match.score1}-${match.score2}`,
-            `${p3?.name}/${p4?.name}`,
-            match.status
-          ]);
-        });
-      });
-    });
-
-    autoTable(doc, {
-      startY: currentY,
-      head: [['Round', 'Court', 'Team 1', 'Score', 'Team 2', 'Status']],
-      body: matchData,
-      styles: { fontSize: 7 },
-    });
-
-    doc.save(`${tournamentName.replace(/\s+/g, '_')}_Results.pdf`);
+    if (!tournament) return;
+    generateTournamentResultsPDF(tournament);
   };
 
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
@@ -523,7 +405,7 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
     try {
       console.log('[OperatorDesk] Finishing tournament:', tournament.id);
       await tournamentService.finishTournament(tournament.id);
-      generatePDF(tournament);
+      generateTournamentResultsPDF(tournament);
       setShowFinishConfirm(false);
       onRefresh?.();
     } catch (err) {
@@ -668,7 +550,8 @@ export default function OperatorDesk({ tournament, onRefresh }: OperatorDeskProp
                 {showAdvanceConfirm ? 'Yes, Advance' : 
                  tournament.status === 'SEEDING' ? 'Complete Seeding' : 
                  tournament.status === 'PLAYOFFS' ? 'Start Playoff Matches' :
-                 tournament.currentRoundIndex === 3 ? 'Choose Team Mates' : 
+                 tournament.status === 'TEAM_SELECTION' ? 'Go to Draft' :
+                 tournament.currentRoundIndex === 3 ? 'Go to Draft' : 
                  `Complete Ladder ${tournament.currentRoundIndex}`}
               </button>
               {showAdvanceConfirm && (

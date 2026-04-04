@@ -12,36 +12,31 @@ interface PlayoffDraftProps {
 
 export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const cutLine = 8;
-  const sortedPlayers = [...tournament.players].sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.pointDiff !== a.pointDiff) return b.pointDiff - a.pointDiff;
-    return b.pointsScored - a.pointsScored;
-  });
-  const qualifiers = sortedPlayers.slice(0, cutLine);
+  const sortedPlayers = [...tournament.players].sort((a, b) => (a.rank || 99) - (b.rank || 99));
   
-  const captains = qualifiers.slice(0, cutLine / 2);
-  const pool = qualifiers.slice(cutLine / 2);
+  // Captains are top 4, Partners are 5-8
+  const captains = sortedPlayers.slice(0, 4);
+  const pool = sortedPlayers.slice(4, 8);
 
   const currentCaptainIdx = (tournament.playoffTeams || []).length;
   const currentCaptain = captains[currentCaptainIdx];
 
   const hasMatches = (tournament.playoffMatches || []).length > 0;
-  const isDraftComplete = currentCaptainIdx >= captains.length && !hasMatches;
+  const isDraftComplete = currentCaptainIdx >= 4;
 
   useEffect(() => {
     setIsLoading(false);
   }, [tournament]);
 
   const handlePick = async (playerId: string) => {
-    if (isLoading || !tournament) return;
+    if (isLoading || !tournament || !currentCaptain) return;
     setIsLoading(true);
     try {
-      const updated = await tournamentService.draftPartner(tournament.id, currentCaptain.id, playerId);
+      const updated = await tournamentService.createPlayoffTeam(tournament.id, currentCaptain.id, playerId);
       onRefresh?.(true, updated);
     } catch (err) {
       console.error('Draft partner error:', err);
-      alert('Failed to draft partner. Please try again.');
+      alert(err instanceof Error ? err.message : 'Failed to draft partner. Please try again.');
       setIsLoading(false);
     }
   };
@@ -50,7 +45,7 @@ export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProp
     if (isLoading || !tournament) return;
     setIsLoading(true);
     try {
-      const updated = await tournamentService.advanceRound(tournament.id);
+      const updated = await tournamentService.finalizePlayoffs(tournament.id);
       onRefresh?.(true, updated);
     } catch (err) {
       console.error('Finalize draft error:', err);
@@ -105,7 +100,9 @@ export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProp
                     }`}
                   >
                     <div className="flex justify-between items-center mb-4">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-tertiary">TEAM {idx + 1}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-tertiary">
+                        {team ? team.name : `TEAM ${idx + 1}`}
+                      </span>
                       {isActive && <div className="text-[10px] bg-primary text-surface px-2 py-0.5 rounded animate-pulse">PICKING...</div>}
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -138,17 +135,19 @@ export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProp
         {/* Available Pool */}
         <div className="space-y-6">
           <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-tertiary">Available Pool</h3>
-            {isDraftComplete && (
-              <button
-                onClick={handleFinalizeDraft}
-                disabled={isLoading}
-                className="px-4 py-2 bg-primary text-surface rounded-lg font-black uppercase tracking-widest text-[10px] hover:bg-primary-dim shadow-lg transition-all flex items-center gap-2"
-              >
-                {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                Finalize Draft
-              </button>
-            )}
+            <h3 className="text-xs font-bold uppercase tracking-widest text-tertiary">Available Pool (Ranks 5-8)</h3>
+            <div className="flex gap-2">
+              {isDraftComplete && (
+                <button
+                  onClick={handleFinalizeDraft}
+                  disabled={isLoading}
+                  className="px-4 py-2 bg-primary text-surface rounded-lg font-black uppercase tracking-widest text-[10px] hover:bg-primary-dim shadow-lg transition-all flex items-center gap-2"
+                >
+                  {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                  Finalize Draft
+                </button>
+              )}
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-2">
             <AnimatePresence mode="popLayout">
@@ -162,7 +161,7 @@ export default function PlayoffDraft({ tournament, onRefresh }: PlayoffDraftProp
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.9 }}
-                    disabled={isPicked || currentCaptainIdx >= captains.length}
+                    disabled={isPicked || isDraftComplete || isLoading}
                     onClick={() => handlePick(player.id)}
                     className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all ${
                       isPicked ? 'opacity-20 border-transparent' : 'border-white/10 bg-black text-white hover:bg-black/80'

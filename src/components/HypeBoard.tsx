@@ -2,18 +2,24 @@ import React from 'react';
 import { Tournament, Player } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowUp, ArrowDown, Minus, Trophy, Download, Radio } from 'lucide-react';
-import { generatePDF } from '../lib/pdf';
+import { generateTournamentResultsPDF } from '../lib/pdf';
 
 interface HypeBoardProps {
   tournament: Tournament;
 }
 
 export default function HypeBoard({ tournament }: HypeBoardProps) {
-  const sortedPlayers = Array.isArray(tournament.players) ? [...tournament.players].sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.pointDiff !== a.pointDiff) return b.pointDiff - a.pointDiff;
-    return b.pointsScored - a.pointsScored;
-  }) : [];
+  const sortedPlayers = Array.isArray(tournament.players) ? [...tournament.players].sort((a, b) => (a.rank || 99) - (b.rank || 99)) : [];
+
+  // Calculate Performance Rank (Pure stats)
+  const performanceSorted = Array.isArray(tournament.players) 
+    ? [...tournament.players].sort((a, b) => {
+        if (b.points !== a.points) return b.points - a.points;
+        if (b.pointDiff !== a.pointDiff) return b.pointDiff - a.pointDiff;
+        return b.pointsScored - a.pointsScored;
+      })
+    : [];
+  const performanceRankMap = new Map(performanceSorted.map((p, i) => [p.id, i + 1]));
 
   const cutLine = 8;
   const isPlayoffs = tournament.status === 'PLAYOFFS' || tournament.status === 'FINISHED';
@@ -155,21 +161,21 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
           </div>
         )}
 
-        {/* Ranking Priority Notice */}
+        {/* Ladder Ranking Rules Notice */}
         <div className="max-w-md mx-auto p-4 bg-surface-container-low border border-outline-variant rounded-xl">
-          <div className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant mb-2">Ranking Priority</div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant mb-2">Ladder Ranking Rules</div>
           <div className="flex justify-center gap-4 text-[11px] font-mono font-bold text-on-surface">
-            <span>1. POINTS</span>
+            <span>1. LADDER POSITION</span>
             <span className="opacity-30">/</span>
-            <span>2. DIFF</span>
+            <span>2. POINTS</span>
             <span className="opacity-30">/</span>
-            <span>3. SCORED</span>
+            <span>3. DIFF</span>
           </div>
         </div>
 
         <div className="pt-4">
           <button 
-            onClick={() => generatePDF(tournament)}
+            onClick={() => generateTournamentResultsPDF(tournament)}
             className="inline-flex items-center gap-2 px-6 py-2.5 bg-black border border-white/10 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-black/80 transition-all text-white shadow-sm"
           >
             <Download className="w-3.5 h-3.5" />
@@ -178,13 +184,24 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
         </div>
       </div>
 
+      {/* Leaderboard Header */}
+      <div className="max-w-6xl mx-auto px-4 mb-4 flex items-center justify-between">
+        <h2 className="text-2xl sm:text-4xl editorial-title font-black text-primary uppercase tracking-tighter">Final Ladder Rankings</h2>
+        <div className="hidden sm:flex items-center gap-4 text-[10px] font-mono font-bold text-on-surface-variant uppercase tracking-widest">
+          <span>Pos</span>
+          <span className="w-24 text-center">Performance</span>
+          <span className="w-32 text-right">Stats</span>
+        </div>
+      </div>
+
       {/* Leaderboard Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 relative max-w-6xl mx-auto">
         <AnimatePresence mode="popLayout">
           {sortedPlayers.map((player, idx) => {
             const rank = idx + 1;
+            const perfRank = performanceRankMap.get(player.id) || 0;
             const isQualified = rank <= cutLine;
-            const delta = player.lastRank ? player.lastRank - rank : 0;
+            const movement = player.movement;
 
             return (
               <motion.div 
@@ -205,16 +222,17 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                     isQualified ? 'border-l-4 border-l-primary' : 'opacity-80 grayscale-[0.5]'
                   }`}
                 >
-                  {/* Rank & Delta */}
+                  {/* Rank & Movement */}
                   <div className="w-10 sm:w-14 flex flex-col items-center shrink-0">
                     <span className="text-xl sm:text-3xl editorial-title font-black">{rank}</span>
+                    <div className="text-[7px] sm:text-[8px] font-mono text-on-surface-variant uppercase mb-1">LADDER</div>
                     <div className="flex items-center gap-0.5 text-[7px] sm:text-[8px] font-bold">
-                      {delta > 0 ? (
-                        <span className="text-on-tertiary-fixed-variant flex items-center bg-tertiary-container/20 px-1 rounded">▲ +{delta}</span>
-                      ) : delta < 0 ? (
-                        <span className="text-secondary flex items-center bg-secondary-container/20 px-1 rounded">▼ -{Math.abs(delta)}</span>
+                      {movement && movement > 0 ? (
+                        <span className="text-on-tertiary-fixed-variant flex items-center bg-tertiary-container/20 px-1 rounded">↑ MOVED UP</span>
+                      ) : movement && movement < 0 ? (
+                        <span className="text-secondary flex items-center bg-secondary-container/20 px-1 rounded">↓ MOVED DOWN</span>
                       ) : (
-                        <span className="opacity-30">— same</span>
+                        <span className="opacity-30">= STAYED</span>
                       )}
                     </div>
                   </div>
@@ -241,6 +259,14 @@ export default function HypeBoard({ tournament }: HypeBoardProps) {
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Performance Rank */}
+                  <div className="hidden sm:flex flex-col items-center justify-center w-24 shrink-0 border-x border-outline-variant/30 px-2">
+                    <span className={`text-lg font-black ${perfRank < rank ? 'text-on-tertiary-fixed-variant' : perfRank > rank ? 'text-secondary' : 'text-on-surface'} group-hover:text-on-primary`}>
+                      #{perfRank}
+                    </span>
+                    <span className="text-[7px] font-mono text-on-surface-variant group-hover:text-on-primary/50 uppercase tracking-tighter">PERF RANK</span>
                   </div>
 
                   {/* Stats */}
